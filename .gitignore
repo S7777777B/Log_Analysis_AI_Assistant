@@ -63,3 +63,6 @@ Thumbs.db
 # 临时文件
 *.tmp
 *.bak
+
+# 模板配置文件
+.trae/project-rules-example.md
