@@ -1,0 +1,10 @@
+# 采集模块核心依赖
+python-dotenv==1.0.0
+pydantic==2.5.0
+pydantic-settings==2.1.0
+kafka-python
+loguru
+
+# 测试依赖
+pytest==7.4.3
+pytest-cov==4.1.0
