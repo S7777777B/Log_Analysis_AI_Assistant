@@ -336,6 +336,35 @@ feature-visualization
    - 解决方案：删除重复的代码段（约 85 行）
    - 影响：页面加载速度提升，用户体验改善
 
+5. ✅ **添加导航按钮状态反馈**（2026-04-12 新增）
+   - 问题：导航按钮点击后没有视觉反馈，用户无法知道当前处于哪个页面
+   - 解决方案：
+     - 使用 `type="primary"` 高亮当前选中页面
+     - 使用 `type="secondary"` 显示未选中页面
+     - 添加 `st.rerun()` 实现点击后立即刷新
+   - 技术实现：
+     ```python
+     # 定义导航配置列表
+     nav_config = [
+         {"col": col1, "label": "📡 实时日志流", "page": "实时日志流", "key": "nav_realtime"},
+         # ... 其他 4 个页面
+     ]
+     
+     # 渲染导航按钮
+     for nav in nav_config:
+         with nav["col"]:
+             # 当前选中的页面使用 primary 类型，其他使用 secondary
+             button_type = "primary" if st.session_state.current_page == nav["page"] else "secondary"
+             if st.button(nav["label"], use_container_width=True, key=nav["key"], type=button_type):
+                 st.session_state.current_page = nav["page"]
+                 st.rerun()
+     ```
+   - 用户体验：
+     - ✅ 当前页面按钮高亮显示（蓝色）
+     - ✅ 其他页面按钮正常显示（灰色）
+     - ✅ 点击后立即刷新页面内容
+     - ✅ 视觉反馈清晰，用户一目了然
+
 #### 第三阶段：试运行测试（已完成）
 
 1. ✅ **启动可视化仪表板**

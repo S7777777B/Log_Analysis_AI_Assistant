@@ -26,33 +26,31 @@ def create_dashboard():
     
     st.title("🔍 日志分析 AI 助手")
     
+    # 初始化页面状态
+    if "current_page" not in st.session_state:
+        st.session_state.current_page = "实时日志流"
+    
     # 导航按钮 - 平铺展示
     st.subheader("导航")
     col1, col2, col3, col4, col5 = st.columns(5)
     
-    with col1:
-        if st.button("📡 实时日志流", use_container_width=True, key="nav_realtime"):
-            st.session_state.current_page = "实时日志流"
+    # 定义导航配置
+    nav_config = [
+        {"col": col1, "label": "📡 实时日志流", "page": "实时日志流", "key": "nav_realtime"},
+        {"col": col2, "label": "👥 UEBA 异常排行", "page": "UEBA 异常排行", "key": "nav_ueba"},
+        {"col": col3, "label": "🛡️ 安全评分看板", "page": "安全评分看板", "key": "nav_score"},
+        {"col": col4, "label": "🤖 AI 处置建议", "page": "AI 处置建议", "key": "nav_ai"},
+        {"col": col5, "label": "🔍 历史查询", "page": "历史查询", "key": "nav_history"},
+    ]
     
-    with col2:
-        if st.button("👥 UEBA 异常排行", use_container_width=True, key="nav_ueba"):
-            st.session_state.current_page = "UEBA 异常排行"
-    
-    with col3:
-        if st.button("🛡️ 安全评分看板", use_container_width=True, key="nav_score"):
-            st.session_state.current_page = "安全评分看板"
-    
-    with col4:
-        if st.button("🤖 AI 处置建议", use_container_width=True, key="nav_ai"):
-            st.session_state.current_page = "AI 处置建议"
-    
-    with col5:
-        if st.button("🔍 历史查询", use_container_width=True, key="nav_history"):
-            st.session_state.current_page = "历史查询"
-    
-    # 初始化页面状态
-    if "current_page" not in st.session_state:
-        st.session_state.current_page = "实时日志流"
+    # 渲染导航按钮
+    for nav in nav_config:
+        with nav["col"]:
+            # 当前选中的页面使用 primary 类型，其他使用 secondary
+            button_type = "primary" if st.session_state.current_page == nav["page"] else "secondary"
+            if st.button(nav["label"], use_container_width=True, key=nav["key"], type=button_type):
+                st.session_state.current_page = nav["page"]
+                st.rerun()
     
     st.divider()
     
