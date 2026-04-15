@@ -16,7 +16,7 @@
 
 | 组件 | 最低版本 | 测试版本 | 用途 |
 |------|----------|----------|------|
-| Python | 3.9 | 3.9.x | 运行采集器 |
+| Python | 3.9 | 3.13.x | 运行采集器 |
 | kafka-python | 2.3.0 | 2.3.0 | Kafka 客户端 |
 | Apache Kafka | 3.0 | 4.2.0 | 消息队列 |
 | Filebeat | 7.x | 8.19.13 | 日志采集（可选） |
@@ -29,7 +29,7 @@
 
 ```bash
 cd /path/to/Log_Analysis_AI_Assistant
-python3.9 -m venv venv
+python3.13 -m venv venv
 source venv/bin/activate
 pip install --upgrade pip
 pip install kafka-python==2.3.0
@@ -323,5 +323,3 @@ Log_Analysis_AI_Assistant/
 ```
 
 ---
-
-**文档结束** – 按需选择 FilebeatCollector 或 FlumeCollector，遵循上述步骤即可完成日志采集与消费。

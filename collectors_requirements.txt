@@ -1,0 +1,4 @@
+pydantic_settings
+kafka-python==2.3.0
+loguru
+#docker 4.2 $ filebeat 8.19.13另外安装
