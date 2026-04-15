@@ -52,6 +52,7 @@ reports/weekly/*
 .coverage
 htmlcov/
 .tox/
+mytest/
 
 # Jupyter Notebook
 .ipynb_checkpoints
@@ -64,5 +65,8 @@ Thumbs.db
 *.tmp
 *.bak
 
-# 模板配置文件
+# 模板文件
 .trae/project-rules-example.md
+
+# 钉钉老师给的文件可放置的文件夹
+.trae/dingding/
