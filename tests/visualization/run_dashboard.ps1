@@ -1,4 +1,4 @@
-# 可视化仪表板启动脚本
+# 可视化仪表板启动脚本windows版本
 # 使用方法：.\tests\run_dashboard.ps1
 
 Write-Host "========================================" -ForegroundColor Cyan
