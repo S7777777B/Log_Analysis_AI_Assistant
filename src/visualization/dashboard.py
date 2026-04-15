@@ -227,6 +227,7 @@ def show_realtime_logs():
     st.divider()
     st.subheader("📊 实时统计")
     
+    # 待实现接口：从后端获取真实的实时统计数据
     stat_col1, stat_col2, stat_col3, stat_col4 = st.columns(4)
     with stat_col1:
         st.metric("今日日志总量", "125,458", "+12%")
@@ -255,6 +256,7 @@ def show_ueba_ranking():
     # 异常用户 TOP10 排行
     st.subheader("🔴 异常用户 TOP10")
     
+    # 待实现接口：从后端获取真实的异常用户排行数据
     ranking_data = {
         "排名": list(range(1, 11)),
         "用户名": ["zhangsan", "lisi", "wangwu", "zhaoliu", "sunqi", 
@@ -341,6 +343,7 @@ def show_security_score():
     # 安全评分卡片
     col1, col2, col3, col4 = st.columns(4)
     
+    # 待实现接口：从后端获取真实的安全评分数据
     with col1:
         st.metric("整体安全评分", "75", "-5", delta_color="inverse")
     with col2:
@@ -355,6 +358,7 @@ def show_security_score():
     # 安全评分趋势图
     st.subheader("📈 安全评分趋势")
     
+    # 待实现接口：从后端获取真实的安全评分趋势数据
     score_data = pd.DataFrame({
         "日期": pd.date_range(end=datetime.now(), periods=7, freq='D').strftime("%Y-%m-%d"),
         "安全评分": [85, 82, 78, 80, 75, 73, 75],
@@ -370,6 +374,7 @@ def show_security_score():
     
     with col1:
         st.subheader("⚠️ 风险等级分布")
+        # 待实现接口：从后端获取真实的风险等级分布数据
         risk_data = pd.DataFrame({
             "风险等级": ["🔴 高危", "🟠 中危", "🟡 低危"],
             "事件数": [5, 18, 45]
@@ -378,6 +383,7 @@ def show_security_score():
     
     with col2:
         st.subheader("🎯 威胁类型统计")
+        # 待实现接口：从后端获取真实的威胁类型统计数据
         threat_data = pd.DataFrame({
             "威胁类型": ["账号接管", "异常访问", "暴力破解", "数据外传", "其他"],
             "数量": [3, 15, 8, 2, 40]
@@ -389,6 +395,7 @@ def show_security_score():
     st.subheader("📄 日报生成")
     
     if st.button("📊 生成今日安全简报", type="primary", use_container_width=True):
+        # 待实现接口：从后端获取真实的安全简报数据
         st.markdown("""
         **今日安全态势简报**
         
@@ -429,8 +436,7 @@ def show_ai_suggestions():
     st.divider()
     
     # AI 处置建议列表
-    st.subheader("📋 待处置建议")
-    
+    # 待实现接口：从后端获取真实的处置建议数据
     suggestions = [
         {
             "id": 1, "用户": "zhangsan", "威胁类型": "账号接管", "风险等级": "🔴 高危",
@@ -453,53 +459,95 @@ def show_ai_suggestions():
             "处置建议": "限制下载权限，联系用户主管确认业务需求",
             "置信度": "75%", "处置状态": "处置中", "生成时间": "2024-01-20 16:20"
         },
+        {
+            "id": 4, "用户": "zhaoliu", "威胁类型": "异常访问", "风险等级": "🟡 低危",
+            "异常描述": "用户在非工作时间访问系统",
+            "AI 分析": "可能是用户加班，建议核实",
+            "处置建议": "联系用户确认访问原因",
+            "置信度": "45%", "处置状态": "已处置", "生成时间": "2024-01-19 22:15"
+        },
+        {
+            "id": 5, "用户": "sunqi", "威胁类型": "权限提升", "风险等级": "🔴 高危",
+            "异常描述": "用户尝试访问超出权限的资源",
+            "AI 分析": "可能存在权限提升攻击",
+            "处置建议": "立即冻结账号，进行安全审计",
+            "置信度": "88%", "处置状态": "误报", "生成时间": "2024-01-18 14:30"
+        },
     ]
     
+    # 根据筛选条件过滤建议
+    filtered_suggestions = []
     for suggestion in suggestions:
-        with st.expander(
-            f"{suggestion['风险等级']} {suggestion['威胁类型']} - {suggestion['用户']} ({suggestion['生成时间']})",
-            expanded=False
-        ):
-            col1, col2, col3 = st.columns(3)
-            with col1:
-                st.metric("风险等级", suggestion["风险等级"])
-            with col2:
-                st.metric("置信度", suggestion["置信度"])
-            with col3:
-                st.metric("处置状态", suggestion["处置状态"])
+        # 状态筛选
+        if status_filter != "全部" and suggestion["处置状态"] != status_filter:
+            continue
+        # 风险等级筛选
+        if risk_filter != "全部" and suggestion["风险等级"] != risk_filter:
+            continue
+        filtered_suggestions.append(suggestion)
+    
+    # 按处置状态分类显示
+    status_order = ["待处置", "处置中", "已处置", "误报"]
+    for status in status_order:
+        status_suggestions = [s for s in filtered_suggestions if s["处置状态"] == status]
+        if status_suggestions:
+            # 根据风险等级排序（高危 > 中危 > 低危）
+            risk_order = {"🔴 高危": 0, "🟠 中危": 1, "🟡 低危": 2}
+            status_suggestions.sort(key=lambda x: risk_order[x["风险等级"]])
             
+            # 显示状态分组
+            st.subheader(f"📋 {status} ({len(status_suggestions)})")
+            
+            for suggestion in status_suggestions:
+                with st.expander(
+                    f"{suggestion['风险等级']} {suggestion['威胁类型']} - {suggestion['用户']} ({suggestion['生成时间']})",
+                    expanded=False
+                ):
+                    col1, col2, col3 = st.columns(3)
+                    with col1:
+                        st.metric("风险等级", suggestion["风险等级"])
+                    with col2:
+                        st.metric("置信度", suggestion["置信度"])
+                    with col3:
+                        st.metric("处置状态", suggestion["处置状态"])
+                    
+                    st.divider()
+                    
+                    st.markdown(f"**📝 异常描述：**\n{suggestion['异常描述']}")
+                    st.info(f"**🤖 AI 分析：**\n{suggestion['AI 分析']}")
+                    st.warning(f"**💡 处置建议：**\n{suggestion['处置建议']}")
+                    
+                    st.divider()
+                    
+                    # 按钮行
+                    col1, col2, col3 = st.columns(3)
+                    show_logs = False
+                    
+                    with col1:
+                        if st.button("🔍 查看详细日志", key=f"detail_{suggestion['id']}"):
+                            show_logs = True
+                    with col2:
+                        if st.button("⚠️ 标记为误报", key=f"false_{suggestion['id']}"):
+                            pass
+                    with col3:
+                        if st.button("✅ 标记为已处置", key=f"resolve_{suggestion['id']}"):
+                            pass
+                    
+                    # 日志内容显示在按钮行下方，占满整个宽度
+                    if show_logs:
+                        logs = [
+                            "2024-01-21 03:15:00 LOGIN user=zhangsan ip=10.0.0.100 status=SUCCESS",
+                            "2024-01-21 03:16:00 API_CALL user=zhangsan endpoint=/api/sensitive/data count=1",
+                            "2024-01-21 03:17:00 API_CALL user=zhangsan endpoint=/api/sensitive/data count=2",
+                        ]
+                        st.markdown("**相关日志：**")
+                        for log in logs:
+                            st.code(log)
             st.divider()
-            
-            st.markdown(f"**📝 异常描述：**\n{suggestion['异常描述']}")
-            st.info(f"**🤖 AI 分析：**\n{suggestion['AI 分析']}")
-            st.warning(f"**💡 处置建议：**\n{suggestion['处置建议']}")
-            
-            st.divider()
-            
-            # 按钮行
-            col1, col2, col3 = st.columns(3)
-            show_logs = False
-            
-            with col1:
-                if st.button("🔍 查看详细日志", key=f"detail_{suggestion['id']}"):
-                    show_logs = True
-            with col2:
-                if st.button("⚠️ 标记为误报", key=f"false_{suggestion['id']}"):
-                    pass
-            with col3:
-                if st.button("✅ 标记为已处置", key=f"resolve_{suggestion['id']}"):
-                    pass
-            
-            # 日志内容显示在按钮行下方，占满整个宽度
-            if show_logs:
-                logs = [
-                    "2024-01-21 03:15:00 LOGIN user=zhangsan ip=10.0.0.100 status=SUCCESS",
-                    "2024-01-21 03:16:00 API_CALL user=zhangsan endpoint=/api/sensitive/data count=1",
-                    "2024-01-21 03:17:00 API_CALL user=zhangsan endpoint=/api/sensitive/data count=2",
-                ]
-                st.markdown("**相关日志：**")
-                for log in logs:
-                    st.code(log)
+    
+    # 如果没有符合条件的建议
+    if not filtered_suggestions:
+        st.info("没有符合条件的处置建议")
     
     # 统计信息
     st.divider()
@@ -556,6 +604,7 @@ def show_history_search():
     # 查询结果
     st.subheader("📊 查询结果")
     
+    # 待实现接口：从后端获取真实的查询结果数据
     search_results = [
         {"时间": "2024-01-21 03:15:00", "用户": "zhangsan", "类型": "VPN 登录", 
          "IP": "10.0.0.100", "状态": "❌ 失败", "地点": "广州", "风险等级": "🔴 高危"},
