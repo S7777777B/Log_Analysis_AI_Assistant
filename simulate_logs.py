@@ -1,94 +1,66 @@
 #!/usr/bin/env python3
-# simulate_logs.py
+"""
+模拟日志生成器 - 仅生成有效日志（包含所有必需字段）
+输出格式：JSON，每行一条
+输出路径：sample_logs/app.log
+"""
+
+import json
 import time
 import random
-import logging
-from logging.handlers import RotatingFileHandler
 from datetime import datetime
-import os
+from pathlib import Path
 
-LOG_DIR = "./sample_logs"
-os.makedirs(LOG_DIR, exist_ok=True)
+# 输出文件路径
+LOG_FILE = Path(__file__).parent / "sample_logs" / "app.log"
 
-LOG_CONFIG = {
-    "vpn": "vpn.log",
-    "oa": "oa.log",
-    "api": "api.log",
-    "system": "system.log"
-}
+# 确保目录存在
+LOG_FILE.parent.mkdir(exist_ok=True)
 
-USERS = ["zhangwei", "lili", "wangqiang", "admin", "liujie", "zhaoyun"]
-IP_POOL = [f"192.168.1.{i}" for i in range(10, 30)] + [f"10.0.0.{i}" for i in range(5, 15)]
+# 可选的日志类型和来源
+LOG_TYPES = ["vpn", "api", "db", "system"]
+SOURCES = [
+    "/var/log/vpn.log",
+    "/var/log/api.log",
+    "/var/log/db.log",
+    "/var/log/system.log"
+]
+MESSAGES = [
+    "User 'admin' logged in from 192.168.1.100",
+    "Request to /api/v1/users took 45ms",
+    "Connection pool exhausted, retrying",
+    "Disk usage reached 85%",
+    "Firewall rule updated"
+]
 
-def get_logger(name, filename):
-    logger = logging.getLogger(name)
-    logger.setLevel(logging.INFO)
-    handler = RotatingFileHandler(
-        os.path.join(LOG_DIR, filename),
-        maxBytes=10*1024*1024,
-        backupCount=5,
-        encoding='utf-8'
-    )
-    handler.setFormatter(logging.Formatter('%(message)s'))
-    logger.addHandler(handler)
-    logger.propagate = False
-    return logger
-
-loggers = {t: get_logger(t, f) for t, f in LOG_CONFIG.items()}
-
-def vpn_log():
-    user = random.choice(USERS)
-    ip = random.choice(IP_POOL)
-    action = random.choice(["login", "logout", "login_failed"])
-    ts = datetime.now().isoformat()
-    if action == "login_failed":
-        reason = random.choice(["wrong_pwd", "expired", "ip_deny"])
-        return f"{ts} [VPN] user={user} src_ip={ip} action={action} reason={reason}"
-    return f"{ts} [VPN] user={user} src_ip={ip} action={action}"
-
-def oa_log():
-    user = random.choice(USERS)
-    ops = ["approve", "reject", "clock_in", "upload", "download"]
-    act = random.choice(ops)
-    ts = datetime.now().isoformat()
-    return f"{ts} [OA] user={user} action={act}"
-
-def api_log():
-    endpoints = ["/api/login", "/api/users", "/api/export", "/api/report"]
-    method = random.choice(["GET", "POST"])
-    ep = random.choice(endpoints)
-    status = random.choices([200, 400, 401, 500], weights=[0.8,0.05,0.1,0.05])[0]
-    user = random.choice(USERS)
-    ts = datetime.now().isoformat()
-    return f"{ts} [API] method={method} endpoint={ep} user={user} status={status}"
-
-def system_log():
-    events = ["cpu_high", "mem_critical", "service_start", "service_stop"]
-    ev = random.choice(events)
-    ts = datetime.now().isoformat()
-    if ev in ["cpu_high", "mem_critical"]:
-        val = random.randint(85, 98)
-        return f"{ts} [SYS] event={ev} usage={val}%"
-    svc = random.choice(["nginx", "mysql", "filebeat"])
-    return f"{ts} [SYS] event={ev} service={svc}"
+def generate_valid_log():
+    """生成一条完全有效的日志（包含所有必需字段）"""
+    return {
+        "timestamp": datetime.now().isoformat(),
+        "log_type": random.choice(LOG_TYPES),
+        "source": random.choice(SOURCES),
+        "message": random.choice(MESSAGES)
+    }
 
 def main():
-    print(f"日志生成中，目录: {LOG_DIR}")
-    while True:
-        typ = random.choice(list(LOG_CONFIG.keys()))
-        if typ == "vpn":
-            line = vpn_log()
-        elif typ == "oa":
-            line = oa_log()
-        elif typ == "api":
-            line = api_log()
-        else:
-            line = system_log()
-        loggers[typ].info(line)
-        time.sleep(random.uniform(0.1, 0.5))
+    print(f"有效日志生成器启动，输出文件: {LOG_FILE}")
+    # 清空旧日志，避免干扰
+    if LOG_FILE.exists():
+        LOG_FILE.unlink()
+        print("已清空旧日志文件")
+    
+    count = 0
+    try:
+        while True:
+            log_entry = generate_valid_log()
+            with open(LOG_FILE, "a") as f:
+                f.write(json.dumps(log_entry) + "\n")
+            count += 1
+            if count % 10 == 0:
+                print(f"已生成 {count} 条有效日志")
+            time.sleep(random.uniform(0.5, 2))  # 随机间隔 0.5~2 秒
+    except KeyboardInterrupt:
+        print(f"\n停止生成，共生成 {count} 条有效日志")
 
 if __name__ == "__main__":
-    try:
-        main()
-    except KeyboardInterrupt:
-        print("停止生成")
+    main()

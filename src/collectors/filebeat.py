@@ -4,7 +4,8 @@ Filebeat 采集器（消费者）
 """
 import json
 from typing import Any, Dict, Generator, Optional
-from kafka import KafkaConsumer, KafkaProducer
+from datetime import datetime
+from kafka import KafkaConsumer
 from .base import BaseCollector
 from ..utils.logger import get_logger
 
@@ -27,10 +28,10 @@ class FilebeatCollector(BaseCollector):
                 self.topic,
                 bootstrap_servers=self.bootstrap_servers.split(','),
                 group_id=self.group_id,
-                auto_offset_reset='earliest',    # 首次从最早开始，之后自动续传
+                auto_offset_reset='earliest',
                 enable_auto_commit=True,
                 auto_commit_interval_ms=5000,
-                value_deserializer=lambda m: json.loads(m.decode('utf-8')),
+                value_deserializer=lambda m: m.decode('utf-8'),   # 先解码为字符串
                 key_deserializer=lambda m: m.decode('utf-8') if m else None
             )
             self.is_running = True
@@ -58,20 +59,31 @@ class FilebeatCollector(BaseCollector):
             if not self.is_running:
                 break
             raw_value = msg.value
-            # 原始消息中可能包含 Filebeat 添加的字段，我们提取核心内容
+            # 尝试解析为 JSON，失败则作为纯文本处理
+            try:
+                parsed = json.loads(raw_value)
+            except json.JSONDecodeError:
+                # 纯文本日志，构造一个简单的日志字典
+                parsed = {
+                    'message': raw_value,
+                    'timestamp': datetime.now().isoformat(),
+                    'log_type': 'unknown',
+                    'source': 'filebeat'
+                }
+            # 统一提取字段
             log_record = {
-                'timestamp': raw_value.get('@timestamp', raw_value.get('timestamp')),
-                'log_type': raw_value.get('fields', {}).get('log_type') or raw_value.get('log_type', 'unknown'),
-                'source': raw_value.get('log', {}).get('file', {}).get('path') or raw_value.get('source', 'filebeat'),
-                'message': raw_value.get('message', ''),
-                'host': raw_value.get('host', {}).get('name', 'unknown'),
+                'timestamp': parsed.get('@timestamp', parsed.get('timestamp')),
+                'log_type': parsed.get('fields', {}).get('log_type') or parsed.get('log_type', 'unknown'),
+                'source': parsed.get('log', {}).get('file', {}).get('path') or parsed.get('source', 'filebeat'),
+                'message': parsed.get('message', ''),
+                'host': parsed.get('host', {}).get('name', 'unknown'),
                 'offset': msg.offset,
                 'partition': msg.partition
             }
             # 补充可能存在的字段（如 user, ip 等，供后续解析模块使用）
             for extra_field in ['user', 'src_ip', 'action', 'status', 'method', 'endpoint']:
-                if extra_field in raw_value:
-                    log_record[extra_field] = raw_value[extra_field]
+                if extra_field in parsed:
+                    log_record[extra_field] = parsed[extra_field]
             
             # 验证并丰富
             if self.validate_log(log_record):

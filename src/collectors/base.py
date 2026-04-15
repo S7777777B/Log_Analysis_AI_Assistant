@@ -38,10 +38,14 @@ class BaseCollector(ABC):
         required = ['timestamp', 'log_type', 'source', 'message']
         if not all(k in log_data for k in required):
             return False
-        # 时间戳格式校验（ISO格式）
+        # 时间戳格式校验（ISO格式），兼容 'Z' 结尾的 UTC 表示
         try:
-            datetime.fromisoformat(log_data['timestamp'])
-        except:
+            ts = log_data['timestamp']
+            # 将 'Z' 替换为 '+00:00'，因为 fromisoformat 不支持 'Z'
+            if ts.endswith('Z'):
+                ts = ts[:-1] + '+00:00'
+            datetime.fromisoformat(ts)
+        except Exception:
             return False
         # log_type 必须在预设范围内（可在子类中重写）
         return True

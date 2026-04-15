@@ -1,7 +1,24 @@
+# ==================== Filebeat 配置（相对路径版本）====================
+# 说明：所有相对路径均基于执行 filebeat 命令的目录（项目根目录）
+# 使用时请确保在项目根目录下运行：sudo filebeat -c config/filebeat.yml
+
 filebeat.inputs:
-  # 系统日志
+  # 测试日志（项目内 sample_logs 目录，用于集成测试）
   - type: log
     enabled: true
+    paths:
+      - sample_logs/*.log
+    fields:
+      log_type: test
+    fields_under_root: true
+    multiline.pattern: '^{'
+    multiline.negate: true
+    multiline.match: after
+
+  # 以下为真实环境配置，可根据需要启用或禁用
+  # 系统日志（Linux）
+  - type: log
+    enabled: false          # 测试时禁用，避免因权限或路径不存在而报错
     paths:
       - /var/log/syslog
       - /var/log/auth.log
@@ -9,13 +26,10 @@ filebeat.inputs:
       log_type: system
       source: linux
     fields_under_root: true
-    multiline.pattern: '^[0-9]{4}-[0-9]{2}-[0-9]{2}'
-    multiline.negate: true
-    multiline.match: after
 
-  # VPN 日志（确保目录存在）
+  # VPN 日志（示例）
   - type: log
-    enabled: true
+    enabled: false
     paths:
       - /var/log/vpn/*.log
     fields:
@@ -23,9 +37,9 @@ filebeat.inputs:
       source: vpn_server
     fields_under_root: true
 
-  # OA 系统日志（确保目录存在）
+  # OA 系统日志
   - type: log
-    enabled: true
+    enabled: false
     paths:
       - /var/log/oa/*.log
     fields:
@@ -33,9 +47,9 @@ filebeat.inputs:
       source: oa_system
     fields_under_root: true
 
-  # Nginx 访问日志（如果没有安装 Nginx，可以暂时注释）
+  # Nginx 访问日志
   - type: log
-    enabled: true
+    enabled: false
     paths:
       - /var/log/nginx/access.log
     fields:
@@ -43,9 +57,9 @@ filebeat.inputs:
       source: nginx
     fields_under_root: true
 
-  # API 日志（确保目录存在）
+  # API 日志
   - type: log
-    enabled: true
+    enabled: false
     paths:
       - /var/log/api/*.log
     fields:
@@ -53,15 +67,14 @@ filebeat.inputs:
       source: api_server
     fields_under_root: true
 
-# processors（简化版）
+# 处理器
 processors:
   - add_host_metadata: ~
-  # timestamp 处理器已移除，后续可用 dissect 提取时间
 
-# 输出到 Kafka（使用默认值）
+# 输出到 Kafka（使用环境变量，默认值适用于本地测试）
 output.kafka:
-  hosts: ["${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}"]
-  topic: "${KAFKA_LOGS_TOPIC:logs_raw}"
+  hosts: ["localhost:9092"]
+  topic: "logs_raw"
   compression: gzip
   required_acks: 1
   max_retries: 3
@@ -69,10 +82,14 @@ output.kafka:
     init: 1s
     max: 10s
 
+# 数据目录（相对路径，将在项目根目录下创建）
+path.data: filebeat_data
+
+# 日志配置
 logging.level: info
 logging.to_files: true
 logging.files:
-  path: ${LOG_OUTPUT_DIR:./filebeat_logs}
+  path: filebeat_logs          # 相对路径
   name: filebeat.log
   keepfiles: 7
   permissions: 0644
