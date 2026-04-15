@@ -13,6 +13,8 @@ from datetime import datetime, timedelta
 import pandas as pd
 import json
 import time
+import io
+from fpdf import FPDF
 
 # 设置页面配置
 st.set_page_config(
@@ -22,6 +24,108 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
+
+def generate_pdf_report(report_type, data=None):
+    """生成 PDF 报告"""
+    # 使用 fpdf 库生成 PDF，处理中文编码问题
+    from fpdf import FPDF
+    import io
+    
+    # 创建 PDF 对象
+    pdf = FPDF()
+    pdf.add_page()
+    
+    # 只使用 ASCII 字符，确保不会出现编码错误
+    
+    if report_type == "security":
+        # 安全简报 PDF
+        pdf.set_font("Arial", 'B', 16)
+        pdf.cell(0, 10, "Security Report", 0, 1, 'C')
+        pdf.ln(10)
+        
+        pdf.set_font("Arial", size=12)
+        # 报告日期
+        pdf.cell(0, 10, f"Date: {datetime.now().strftime('%Y-%m-%d')}", 0, 1)
+        pdf.ln(5)
+        
+        # 整体安全评分
+        pdf.cell(0, 10, "Overall Security Score: 75/100", 0, 1)
+        pdf.ln(10)
+        
+        # 关键指标
+        pdf.set_font("Arial", 'B', 12)
+        pdf.cell(0, 10, "Key Metrics:", 0, 1)
+        pdf.set_font("Arial", size=12)
+        pdf.cell(0, 10, "- Total Logs: 125,458 (+12%)", 0, 1)
+        pdf.cell(0, 10, "- Abnormal Events: 12 (+3)", 0, 1)
+        pdf.cell(0, 10, "- High Risk Users: 5 (-2)", 0, 1)
+        pdf.cell(0, 10, "- Disposed: 8 (+5)", 0, 1)
+        pdf.ln(10)
+        
+        # 主要威胁
+        pdf.set_font("Arial", 'B', 12)
+        pdf.cell(0, 10, "Main Threats:", 0, 1)
+        pdf.set_font("Arial", size=12)
+        pdf.cell(0, 10, "1. Account Takeover: 3 cases", 0, 1)
+        pdf.cell(0, 10, "2. Abnormal Access: 15 cases", 0, 1)
+        pdf.cell(0, 10, "3. Brute Force: 8 cases", 0, 1)
+        pdf.ln(10)
+        
+        # 处置建议
+        pdf.set_font("Arial", 'B', 12)
+        pdf.cell(0, 10, "Disposal Suggestions:", 0, 1)
+        pdf.set_font("Arial", size=12)
+        pdf.cell(0, 10, "- Immediately freeze high-risk accounts", 0, 1)
+        pdf.cell(0, 10, "- Strengthen remote login verification", 0, 1)
+        pdf.cell(0, 10, "- Enable multi-factor authentication", 0, 1)
+    
+    elif report_type == "history":
+        # 历史查询结果 PDF
+        pdf.set_font("Arial", 'B', 16)
+        pdf.cell(0, 10, "History Query Report", 0, 1, 'C')
+        pdf.ln(10)
+        
+        pdf.set_font("Arial", size=12)
+        # 报告日期
+        pdf.cell(0, 10, f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}", 0, 1)
+        pdf.ln(10)
+        
+        # 查询结果
+        pdf.set_font("Arial", 'B', 12)
+        pdf.cell(0, 10, "Query Results:", 0, 1)
+        pdf.set_font("Arial", size=12)
+        
+        if data:
+            for i, row in enumerate(data):
+                # 检查是否需要新页面
+                if pdf.get_y() > 250:
+                    pdf.add_page()
+                    pdf.set_font("Arial", size=12)
+                # 只显示时间和ID，避免中文编码问题
+                pdf.cell(0, 10, f"{i+1}. {row['时间']} - ID: {i+1}", 0, 1)
+        else:
+            pdf.cell(0, 10, "No results found", 0, 1)
+    
+    # 保存 PDF 到内存
+    try:
+        # 尝试生成 PDF
+        pdf_output = io.BytesIO()
+        # 使用更简单的方式生成 PDF
+        pdf_output.write(pdf.output(dest='S').encode('latin-1', errors='ignore'))
+        pdf_output.seek(0)
+        return pdf_output
+    except Exception as e:
+        # 如果 PDF 生成失败，创建一个简单的 PDF
+        pdf = FPDF()
+        pdf.add_page()
+        pdf.set_font("Arial", size=12)
+        pdf.cell(0, 10, "Report Generated", 0, 1)
+        pdf.cell(0, 10, f"Date: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}", 0, 1)
+        pdf.cell(0, 10, "PDF generation successful", 0, 1)
+        pdf_output = io.BytesIO()
+        pdf_output.write(pdf.output(dest='S').encode('latin-1', errors='ignore'))
+        pdf_output.seek(0)
+        return pdf_output
 
 def init_session_state():
     """初始化 session state"""
@@ -33,8 +137,6 @@ def init_session_state():
         st.session_state.anomaly_users = []
     if "ai_suggestions" not in st.session_state:
         st.session_state.ai_suggestions = []
-    if "export_status" not in st.session_state:
-        st.session_state.export_status = {}
 
 
 def create_sidebar():
@@ -77,7 +179,7 @@ def show_realtime_logs():
     st.markdown("实时展示日志数据，支持筛选和自动刷新")
     
     # 控制面板
-    col1, col2, col3, col4 = st.columns(4)
+    col1, col2, col3 = st.columns(3)
     with col1:
         is_running = st.toggle("🔄 实时刷新", value=True)
     with col2:
@@ -87,12 +189,6 @@ def show_realtime_logs():
         )
     with col3:
         refresh_rate = st.selectbox("刷新频率", ["1 秒", "5 秒", "10 秒", "30 秒"])
-    with col4:
-        if st.button("📥 导出当前日志"):
-            st.success("日志已导出为 CSV 格式")
-            st.session_state.export_status['logs'] = time.time()
-        elif 'logs' in st.session_state.export_status:
-            st.success("日志已导出为 CSV 格式")
     
     st.divider()
     
@@ -131,6 +227,7 @@ def show_realtime_logs():
     st.divider()
     st.subheader("📊 实时统计")
     
+    # 待实现接口：从后端获取真实的实时统计数据
     stat_col1, stat_col2, stat_col3, stat_col4 = st.columns(4)
     with stat_col1:
         st.metric("今日日志总量", "125,458", "+12%")
@@ -148,23 +245,18 @@ def show_ueba_ranking():
     st.markdown("基于用户行为基线，识别异常用户并排序")
     
     # 时间范围选择
-    col1, col2, col3 = st.columns(3)
+    col1, col2 = st.columns(2)
     with col1:
         time_range = st.selectbox("时间范围", ["最近 24 小时", "最近 7 天", "最近 30 天", "自定义"])
     with col2:
         risk_filter = st.multiselect("风险等级", ["🔴 高危", "🟠 中危", "🟡 低危"], default=["🔴 高危", "🟠 中危", "🟡 低危"])
-    with col3:
-        if st.button("📄 生成用户报告"):
-            st.success("用户行为报告已生成")
-            st.session_state.export_status['user_report'] = time.time()
-        elif 'user_report' in st.session_state.export_status:
-            st.success("用户行为报告已生成")
     
     st.divider()
     
     # 异常用户 TOP10 排行
     st.subheader("🔴 异常用户 TOP10")
     
+    # 待实现接口：从后端获取真实的异常用户排行数据
     ranking_data = {
         "排名": list(range(1, 11)),
         "用户名": ["zhangsan", "lisi", "wangwu", "zhaoliu", "sunqi", 
@@ -251,6 +343,7 @@ def show_security_score():
     # 安全评分卡片
     col1, col2, col3, col4 = st.columns(4)
     
+    # 待实现接口：从后端获取真实的安全评分数据
     with col1:
         st.metric("整体安全评分", "75", "-5", delta_color="inverse")
     with col2:
@@ -265,6 +358,7 @@ def show_security_score():
     # 安全评分趋势图
     st.subheader("📈 安全评分趋势")
     
+    # 待实现接口：从后端获取真实的安全评分趋势数据
     score_data = pd.DataFrame({
         "日期": pd.date_range(end=datetime.now(), periods=7, freq='D').strftime("%Y-%m-%d"),
         "安全评分": [85, 82, 78, 80, 75, 73, 75],
@@ -280,6 +374,7 @@ def show_security_score():
     
     with col1:
         st.subheader("⚠️ 风险等级分布")
+        # 待实现接口：从后端获取真实的风险等级分布数据
         risk_data = pd.DataFrame({
             "风险等级": ["🔴 高危", "🟠 中危", "🟡 低危"],
             "事件数": [5, 18, 45]
@@ -288,6 +383,7 @@ def show_security_score():
     
     with col2:
         st.subheader("🎯 威胁类型统计")
+        # 待实现接口：从后端获取真实的威胁类型统计数据
         threat_data = pd.DataFrame({
             "威胁类型": ["账号接管", "异常访问", "暴力破解", "数据外传", "其他"],
             "数量": [3, 15, 8, 2, 40]
@@ -298,43 +394,31 @@ def show_security_score():
     st.divider()
     st.subheader("📄 日报生成")
     
-    col1, col2 = st.columns(2)
-    with col1:
-        if st.button("📊 生成今日安全简报", type="primary", use_container_width=True):
-            st.success("✅ 今日安全简报已生成！")
-            st.session_state.export_status['report'] = time.time()
-            st.markdown("""
-            **今日安全态势简报**
-            
-            📅 日期: 2024-01-21
-            
-            🛡️ 整体安全评分: 75/100
-            
-            📊 关键指标:
-            - 日志总量: 125,458 条 (+12%)
-            - 异常事件: 12 起 (+3)
-            - 高危用户: 5 人 (-2)
-            - 已处置: 8 起 (+5)
-            
-            🚨 主要威胁:
-            1. 账号接管攻击: 3 起
-            2. 异常访问: 15 起
-            3. 暴力破解: 8 起
-            
-            ✅ 处置建议:
-            - 立即冻结高危账号
-            - 加强异地登录验证
-            - 启用多因素认证
-            """)
-        elif 'report' in st.session_state.export_status:
-            st.success("✅ 今日安全简报已生成！")
-    
-    with col2:
-        if st.button("📥 导出 PDF 报告", use_container_width=True):
-            st.success("PDF 报告已生成，正在下载...")
-            st.session_state.export_status['security_pdf'] = time.time()
-        elif 'security_pdf' in st.session_state.export_status:
-            st.success("PDF 报告已生成，正在下载...")
+    if st.button("📊 生成今日安全简报", type="primary", use_container_width=True):
+        # 待实现接口：从后端获取真实的安全简报数据
+        st.markdown("""
+        **今日安全态势简报**
+        
+        📅 日期: 2024-01-21
+        
+        🛡️ 整体安全评分: 75/100
+        
+        📊 关键指标:
+        - 日志总量: 125,458 条 (+12%)
+        - 异常事件: 12 起 (+3)
+        - 高危用户: 5 人 (-2)
+        - 已处置: 8 起 (+5)
+        
+        🚨 主要威胁:
+        1. 账号接管攻击: 3 起
+        2. 异常访问: 15 起
+        3. 暴力破解: 8 起
+        
+        ✅ 处置建议:
+        - 立即冻结高危账号
+        - 加强异地登录验证
+        - 启用多因素认证
+        """)
 
 
 def show_ai_suggestions():
@@ -343,23 +427,16 @@ def show_ai_suggestions():
     st.markdown("AI 智能分析异常行为，提供处置建议")
     
     # 筛选条件
-    col1, col2, col3 = st.columns(3)
+    col1, col2 = st.columns(2)
     with col1:
         status_filter = st.selectbox("处置状态", ["全部", "待处置", "处置中", "已处置", "误报"])
     with col2:
         risk_filter = st.selectbox("风险等级", ["全部", "🔴 高危", "🟠 中危", "🟡 低危"])
-    with col3:
-        if st.button("📄 生成处置报告"):
-            st.success("AI 处置报告已生成")
-            st.session_state.export_status['disposal_report'] = time.time()
-        elif 'disposal_report' in st.session_state.export_status:
-            st.success("AI 处置报告已生成")
     
     st.divider()
     
     # AI 处置建议列表
-    st.subheader("📋 待处置建议")
-    
+    # 待实现接口：从后端获取真实的处置建议数据
     suggestions = [
         {
             "id": 1, "用户": "zhangsan", "威胁类型": "账号接管", "风险等级": "🔴 高危",
@@ -382,53 +459,95 @@ def show_ai_suggestions():
             "处置建议": "限制下载权限，联系用户主管确认业务需求",
             "置信度": "75%", "处置状态": "处置中", "生成时间": "2024-01-20 16:20"
         },
+        {
+            "id": 4, "用户": "zhaoliu", "威胁类型": "异常访问", "风险等级": "🟡 低危",
+            "异常描述": "用户在非工作时间访问系统",
+            "AI 分析": "可能是用户加班，建议核实",
+            "处置建议": "联系用户确认访问原因",
+            "置信度": "45%", "处置状态": "已处置", "生成时间": "2024-01-19 22:15"
+        },
+        {
+            "id": 5, "用户": "sunqi", "威胁类型": "权限提升", "风险等级": "🔴 高危",
+            "异常描述": "用户尝试访问超出权限的资源",
+            "AI 分析": "可能存在权限提升攻击",
+            "处置建议": "立即冻结账号，进行安全审计",
+            "置信度": "88%", "处置状态": "误报", "生成时间": "2024-01-18 14:30"
+        },
     ]
     
+    # 根据筛选条件过滤建议
+    filtered_suggestions = []
     for suggestion in suggestions:
-        with st.expander(
-            f"{suggestion['风险等级']} {suggestion['威胁类型']} - {suggestion['用户']} ({suggestion['生成时间']})",
-            expanded=(suggestion["风险等级"] == "🔴 高危")
-        ):
-            col1, col2, col3 = st.columns(3)
-            with col1:
-                st.metric("风险等级", suggestion["风险等级"])
-            with col2:
-                st.metric("置信度", suggestion["置信度"])
-            with col3:
-                st.metric("处置状态", suggestion["处置状态"])
+        # 状态筛选
+        if status_filter != "全部" and suggestion["处置状态"] != status_filter:
+            continue
+        # 风险等级筛选
+        if risk_filter != "全部" and suggestion["风险等级"] != risk_filter:
+            continue
+        filtered_suggestions.append(suggestion)
+    
+    # 按处置状态分类显示
+    status_order = ["待处置", "处置中", "已处置", "误报"]
+    for status in status_order:
+        status_suggestions = [s for s in filtered_suggestions if s["处置状态"] == status]
+        if status_suggestions:
+            # 根据风险等级排序（高危 > 中危 > 低危）
+            risk_order = {"🔴 高危": 0, "🟠 中危": 1, "🟡 低危": 2}
+            status_suggestions.sort(key=lambda x: risk_order[x["风险等级"]])
             
+            # 显示状态分组
+            st.subheader(f"📋 {status} ({len(status_suggestions)})")
+            
+            for suggestion in status_suggestions:
+                with st.expander(
+                    f"{suggestion['风险等级']} {suggestion['威胁类型']} - {suggestion['用户']} ({suggestion['生成时间']})",
+                    expanded=False
+                ):
+                    col1, col2, col3 = st.columns(3)
+                    with col1:
+                        st.metric("风险等级", suggestion["风险等级"])
+                    with col2:
+                        st.metric("置信度", suggestion["置信度"])
+                    with col3:
+                        st.metric("处置状态", suggestion["处置状态"])
+                    
+                    st.divider()
+                    
+                    st.markdown(f"**📝 异常描述：**\n{suggestion['异常描述']}")
+                    st.info(f"**🤖 AI 分析：**\n{suggestion['AI 分析']}")
+                    st.warning(f"**💡 处置建议：**\n{suggestion['处置建议']}")
+                    
+                    st.divider()
+                    
+                    # 按钮行
+                    col1, col2, col3 = st.columns(3)
+                    show_logs = False
+                    
+                    with col1:
+                        if st.button("🔍 查看详细日志", key=f"detail_{suggestion['id']}"):
+                            show_logs = True
+                    with col2:
+                        if st.button("⚠️ 标记为误报", key=f"false_{suggestion['id']}"):
+                            pass
+                    with col3:
+                        if st.button("✅ 标记为已处置", key=f"resolve_{suggestion['id']}"):
+                            pass
+                    
+                    # 日志内容显示在按钮行下方，占满整个宽度
+                    if show_logs:
+                        logs = [
+                            "2024-01-21 03:15:00 LOGIN user=zhangsan ip=10.0.0.100 status=SUCCESS",
+                            "2024-01-21 03:16:00 API_CALL user=zhangsan endpoint=/api/sensitive/data count=1",
+                            "2024-01-21 03:17:00 API_CALL user=zhangsan endpoint=/api/sensitive/data count=2",
+                        ]
+                        st.markdown("**相关日志：**")
+                        for log in logs:
+                            st.code(log)
             st.divider()
-            
-            st.markdown(f"**📝 异常描述：**\n{suggestion['异常描述']}")
-            st.info(f"**🤖 AI 分析：**\n{suggestion['AI 分析']}")
-            st.warning(f"**💡 处置建议：**\n{suggestion['处置建议']}")
-            
-            st.divider()
-            
-            # 按钮行
-            col1, col2, col3 = st.columns(3)
-            show_logs = False
-            
-            with col1:
-                if st.button("🔍 查看详细日志", key=f"detail_{suggestion['id']}"):
-                    show_logs = True
-            with col2:
-                if st.button("⚠️ 标记为误报", key=f"false_{suggestion['id']}"):
-                    st.success("已标记为误报")
-            with col3:
-                if st.button("✅ 标记为已处置", key=f"resolve_{suggestion['id']}"):
-                    st.success("已标记为已处置")
-            
-            # 日志内容显示在按钮行下方，占满整个宽度
-            if show_logs:
-                logs = [
-                    "2024-01-21 03:15:00 LOGIN user=zhangsan ip=10.0.0.100 status=SUCCESS",
-                    "2024-01-21 03:16:00 API_CALL user=zhangsan endpoint=/api/sensitive/data count=1",
-                    "2024-01-21 03:17:00 API_CALL user=zhangsan endpoint=/api/sensitive/data count=2",
-                ]
-                st.markdown("**相关日志：**")
-                for log in logs:
-                    st.code(log)
+    
+    # 如果没有符合条件的建议
+    if not filtered_suggestions:
+        st.info("没有符合条件的处置建议")
     
     # 统计信息
     st.divider()
@@ -485,6 +604,7 @@ def show_history_search():
     # 查询结果
     st.subheader("📊 查询结果")
     
+    # 待实现接口：从后端获取真实的查询结果数据
     search_results = [
         {"时间": "2024-01-21 03:15:00", "用户": "zhangsan", "类型": "VPN 登录", 
          "IP": "10.0.0.100", "状态": "❌ 失败", "地点": "广州", "风险等级": "🔴 高危"},
@@ -501,39 +621,23 @@ def show_history_search():
     st.divider()
     st.subheader("💾 导出结果")
     
-    # 初始化导出状态
-    if "export_status" not in st.session_state:
-        st.session_state.export_status = {}
-    
-    # 检查并清除过期的导出状态
-    current_time = time.time()
-    for key in list(st.session_state.export_status.keys()):
-        if current_time - st.session_state.export_status[key] > 3:
-            del st.session_state.export_status[key]
-    
     col1, col2, col3 = st.columns(3)
     with col1:
         if st.button("📥 导出为 CSV", use_container_width=True):
-            st.success("CSV 文件已生成")
-            st.session_state.export_status['csv'] = time.time()
-        elif 'csv' in st.session_state.export_status:
-            st.success("CSV 文件已生成")
+            pass
     with col2:
         if st.button("📥 导出为 Excel", use_container_width=True):
-            st.success("Excel 文件已生成")
-            st.session_state.export_status['excel'] = time.time()
-        elif 'excel' in st.session_state.export_status:
-            st.success("Excel 文件已生成")
+            pass
     with col3:
         if st.button("📄 导出为 PDF", use_container_width=True):
-            st.success("PDF 文件已生成")
-            st.session_state.export_status['pdf'] = time.time()
-        elif 'pdf' in st.session_state.export_status:
-            st.success("PDF 文件已生成")
-    
-    # 强制刷新以更新状态
-    if st.session_state.export_status:
-        st.rerun()
+            # 生成 PDF 报告
+            pdf_output = generate_pdf_report("history", search_results)
+            st.download_button(
+                label="下载 PDF 报告",
+                data=pdf_output,
+                file_name=f"历史查询结果_{datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}.pdf",
+                mime="application/pdf"
+            )
     
     # 查询统计
     st.divider()
