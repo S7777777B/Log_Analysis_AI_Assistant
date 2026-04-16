@@ -1,7 +1,8 @@
 #!/bin/bash
 
 # 可视化仪表板启动脚本Linux版本
-# 使用方法：./tests/visualization/run_dashboard.sh
+# 使用方法：chmod +x run_dashboard.sh给执行权限
+# ./tests/visualization/run_dashboard.sh
 
 echo "========================================"
 echo "  日志分析 AI 助手 - 可视化仪表板"

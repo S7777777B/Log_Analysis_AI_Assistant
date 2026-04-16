@@ -1,5 +1,5 @@
 # 可视化仪表板启动脚本windows版本
-# 使用方法：.\tests\run_dashboard.ps1
+# 使用方法：.\tests\visualization\run_dashboard.ps1
 
 Write-Host "========================================" -ForegroundColor Cyan
 Write-Host "  日志分析 AI 助手 - 可视化仪表板" -ForegroundColor Cyan
