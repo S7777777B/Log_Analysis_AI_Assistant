@@ -1,95 +1,16 @@
-# ==================== Filebeat 配置（相对路径版本）====================
-# 说明：所有相对路径均基于执行 filebeat 命令的目录（项目根目录）
-# 使用时请确保在项目根目录下运行：sudo filebeat -c config/filebeat.yml
-
 filebeat.inputs:
-  # 测试日志（项目内 sample_logs 目录，用于集成测试）
   - type: log
     enabled: true
     paths:
-      - sample_logs/*.log
-    fields:
-      log_type: test
-    fields_under_root: true
-    multiline.pattern: '^{'
-    multiline.negate: true
-    multiline.match: after
+      - tests/collectors/sample_logs/*.log
+    json:
+      keys_under_root: true
+      overwrite_keys: true
+      add_error_key: true
 
-  # 以下为真实环境配置，可根据需要启用或禁用
-  # 系统日志（Linux）
-  - type: log
-    enabled: false          # 测试时禁用，避免因权限或路径不存在而报错
-    paths:
-      - /var/log/syslog
-      - /var/log/auth.log
-    fields:
-      log_type: system
-      source: linux
-    fields_under_root: true
-
-  # VPN 日志（示例）
-  - type: log
-    enabled: false
-    paths:
-      - /var/log/vpn/*.log
-    fields:
-      log_type: vpn
-      source: vpn_server
-    fields_under_root: true
-
-  # OA 系统日志
-  - type: log
-    enabled: false
-    paths:
-      - /var/log/oa/*.log
-    fields:
-      log_type: oa
-      source: oa_system
-    fields_under_root: true
-
-  # Nginx 访问日志
-  - type: log
-    enabled: false
-    paths:
-      - /var/log/nginx/access.log
-    fields:
-      log_type: nginx_access
-      source: nginx
-    fields_under_root: true
-
-  # API 日志
-  - type: log
-    enabled: false
-    paths:
-      - /var/log/api/*.log
-    fields:
-      log_type: api
-      source: api_server
-    fields_under_root: true
-
-# 处理器
-processors:
-  - add_host_metadata: ~
-
-# 输出到 Kafka（使用环境变量，默认值适用于本地测试）
 output.kafka:
   hosts: ["localhost:9092"]
   topic: "logs_raw"
   compression: gzip
   required_acks: 1
   max_retries: 3
-  backoff:
-    init: 1s
-    max: 10s
-
-# 数据目录（相对路径，将在项目根目录下创建）
-path.data: filebeat_data
-
-# 日志配置
-logging.level: info
-logging.to_files: true
-logging.files:
-  path: filebeat_logs          # 相对路径
-  name: filebeat.log
-  keepfiles: 7
-  permissions: 0644

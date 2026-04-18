@@ -8,6 +8,12 @@ TODO: 添加单元测试
 3. 测试 Flume 采集器
 """
 
+import sys
+from pathlib import Path
+
+# 添加项目根目录到 sys.path，确保可以导入 src 模块
+sys.path.insert(0, str(Path(__file__).parent.parent.parent))
+
 import pytest
 from unittest.mock import MagicMock, patch
 from src.collectors.filebeat import FilebeatCollector
@@ -137,3 +143,8 @@ class TestFlumeCollector:
         assert logs[0]['log_type'] == 'api'
         assert logs[1]['message'] == 'API call2'
         collector.stop()
+
+
+if __name__ == "__main__":
+    import subprocess
+    sys.exit(subprocess.call(["pytest", __file__]))

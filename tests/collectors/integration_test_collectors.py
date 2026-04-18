@@ -17,13 +17,17 @@ from pathlib import Path
 from datetime import datetime
 
 # 添加项目根目录到 sys.path
-sys.path.insert(0, str(Path(__file__).parent.parent))
+sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 from src.collectors.filebeat import FilebeatCollector
+from src.collectors.flume import FlumeCollector
 
 # ==================== 配置区域 ====================
-PROJECT_ROOT = Path(__file__).parent.parent
-SAMPLE_LOGS_DIR = PROJECT_ROOT / "sample_logs"
+PROJECT_ROOT = Path(__file__).parent.parent.parent          # Log_Analysis_AI_Assistant
+TESTS_COLLECTORS_DIR = Path(__file__).parent                # tests/collectors
+SAMPLE_LOGS_DIR = TESTS_COLLECTORS_DIR / "sample_logs"
+SIMULATE_LOGS_SCRIPT = TESTS_COLLECTORS_DIR / "simulate_logs.py"
+
 KAFKA_TOPIC = "logs_raw"
 KAFKA_BOOTSTRAP = "localhost:9092"
 FILEBEAT_DATA_DIR = PROJECT_ROOT / "filebeat_data"
@@ -60,6 +64,12 @@ def check_prerequisites():
 
 def start_kafka_with_docker():
     compose_file = PROJECT_ROOT / "docker-compose.yml"
+    
+    # 1. 强制删除已存在的同名容器
+    subprocess.run(["docker", "rm", "-f", "kafka-kraft"], 
+                   stderr=subprocess.DEVNULL, stdout=subprocess.DEVNULL)
+    
+    # 2. 写入 docker-compose.yml
     compose_content = """
 services:
   kafka:
@@ -79,7 +89,12 @@ services:
 """
     with open(compose_file, 'w') as f:
         f.write(compose_content)
+    
+    # 3. 清理容器并启动
+    subprocess.run(["docker", "compose", "-f", str(compose_file), "down", "--remove-orphans"],
+                   stderr=subprocess.DEVNULL, stdout=subprocess.DEVNULL)
     subprocess.run(["docker", "compose", "-f", str(compose_file), "up", "-d"], check=True)
+    
     print_ok("Kafka 容器已启动")
     wait_for_kafka()
     create_kafka_topic()
@@ -118,11 +133,10 @@ def create_kafka_topic():
 
 def start_log_generator():
     """启动 simulate_logs.py 子进程作为日志生成器"""
-    log_gen_script = PROJECT_ROOT / "simulate_logs.py"
-    if not log_gen_script.exists():
-        raise FileNotFoundError(f"未找到日志生成脚本: {log_gen_script}")
+    if not SIMULATE_LOGS_SCRIPT.exists():
+        raise FileNotFoundError(f"未找到日志生成脚本: {SIMULATE_LOGS_SCRIPT}")
     # 在后台运行 simulate_logs.py
-    proc = subprocess.Popen([sys.executable, str(log_gen_script)], 
+    proc = subprocess.Popen([sys.executable, str(SIMULATE_LOGS_SCRIPT)], 
                             stdout=subprocess.DEVNULL, 
                             stderr=subprocess.DEVNULL)
     print_ok(f"日志生成器已启动，PID: {proc.pid}")
@@ -162,6 +176,39 @@ def start_filebeat():
     time.sleep(5)
     return proc
 
+def test_consumption(collector_class, name_suffix="", min_messages=5, timeout=30):
+    group_id = f"test_{collector_class.__name__.lower()}_{uuid.uuid4().hex[:8]}"
+    config = {
+        'bootstrap_servers': KAFKA_BOOTSTRAP,
+        'kafka_topic': KAFKA_TOPIC,
+        'group_id': group_id
+    }
+    collector = collector_class(config=config)
+    collector.start()
+    received = []
+    start_time = time.time()
+    try:
+        for log in collector.collect():
+            received.append(log)
+            print(f"[{collector_class.__name__}] 收到第 {len(received)} 条: {log.get('log_type')} - {log.get('message', '')[:60]}")
+            if len(received) >= min_messages:
+                break
+            if time.time() - start_time > timeout:
+                print_fail(f"等待超时 ({timeout}s)")
+                break
+    except Exception as e:
+        print_fail(f"消费出错: {e}")
+    finally:
+        collector.stop()
+    if len(received) >= min_messages:
+        print_ok(f"{collector_class.__name__} 成功消费 {len(received)} 条日志")
+        for log in received[:2]:
+            assert 'timestamp' in log and 'log_type' in log and 'message' in log
+        return True
+    else:
+        print_fail(f"{collector_class.__name__} 只收到 {len(received)} 条")
+        return False
+
 def test_basic_consumption():
     print_step("测试基本消费...")
     group_id = f"basic_{uuid.uuid4().hex[:8]}"
@@ -196,11 +243,15 @@ def test_basic_consumption():
         print_fail(f"只收到 {len(received)} 条")
         return False
 
-def test_incremental_collection():
-    print_step("测试增量采集...")
-    group_id = f"inc_{uuid.uuid4().hex[:8]}"
+def test_incremental_collection(collector_class):
+    group_id = f"inc_{collector_class.__name__.lower()}_{uuid.uuid4().hex[:8]}"
+    config = {
+        'bootstrap_servers': KAFKA_BOOTSTRAP,
+        'kafka_topic': KAFKA_TOPIC,
+        'group_id': group_id
+    }
     # 第一次消费
-    c1 = FilebeatCollector(config={'bootstrap_servers': KAFKA_BOOTSTRAP, 'kafka_topic': KAFKA_TOPIC, 'group_id': group_id})
+    c1 = collector_class(config=config)
     c1.start()
     first = []
     try:
@@ -211,10 +262,10 @@ def test_incremental_collection():
                 break
     finally:
         c1.stop()
-    print(f"第一次消费 {len(first)} 条，offsets: {[l.get('offset') for l in first]}")
+    print(f"[{collector_class.__name__}] 第一次消费 {len(first)} 条，offsets: {[l.get('offset') for l in first]}")
     time.sleep(5)
     # 第二次消费
-    c2 = FilebeatCollector(config={'bootstrap_servers': KAFKA_BOOTSTRAP, 'kafka_topic': KAFKA_TOPIC, 'group_id': group_id})
+    c2 = collector_class(config=config)
     c2.start()
     second = []
     try:
@@ -225,12 +276,12 @@ def test_incremental_collection():
                 break
     finally:
         c2.stop()
-    print(f"第二次消费 {len(second)} 条，offsets: {[l.get('offset') for l in second]}")
+    print(f"[{collector_class.__name__}] 第二次消费 {len(second)} 条，offsets: {[l.get('offset') for l in second]}")
     if first and second:
         if min(l['offset'] for l in second) > max(l['offset'] for l in first):
-            print_ok("增量采集验证成功")
+            print_ok(f"{collector_class.__name__} 增量采集验证成功")
             return True
-    print_fail("增量采集验证失败")
+    print_fail(f"{collector_class.__name__} 增量采集验证失败")
     return False
 
 def cleanup(kafka_compose_file, filebeat_proc, log_gen_proc):
@@ -251,18 +302,26 @@ def main():
     if not check_prerequisites():
         sys.exit(1)
     compose_file = start_kafka_with_docker()
-    log_gen_proc = start_log_generator()   # 启动子进程
+    log_gen_proc = start_log_generator()
     fb_proc = start_filebeat()
     print_step("等待日志生成和传输（10秒）...")
     time.sleep(10)
-    basic_ok = test_basic_consumption()
-    inc_ok = test_incremental_collection()
+
+    # 测试 FilebeatCollector
+    basic_ok_filebeat = test_consumption(FilebeatCollector, min_messages=5)
+    inc_ok_filebeat = test_incremental_collection(FilebeatCollector)
+    
+    # 测试 FlumeCollector
+    basic_ok_flume = test_consumption(FlumeCollector, min_messages=5)
+    inc_ok_flume = test_incremental_collection(FlumeCollector)
+    
     cleanup(compose_file, fb_proc, log_gen_proc)
-    if basic_ok and inc_ok:
-        print("\n🎉 所有集成测试通过！")
+    
+    if basic_ok_filebeat and inc_ok_filebeat and basic_ok_flume and inc_ok_flume:
+        print("\n 所有集成测试通过！")
         sys.exit(0)
     else:
-        print("\n❌ 测试失败")
+        print("\n 测试失败")
         sys.exit(1)
 
 if __name__ == "__main__":
