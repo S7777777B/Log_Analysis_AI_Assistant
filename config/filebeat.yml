@@ -1,16 +1,25 @@
+
 filebeat.inputs:
-  - type: log
-    enabled: true
-    paths:
-      - tests/collectors/sample_logs/*.log
-    json:
-      keys_under_root: true
-      overwrite_keys: true
-      add_error_key: true
+- type: log
+  enabled: true
+  paths:
+    - /home/syb/Downloads/project/Log_Analysis_AI_Assistant/tests/collectors/sample_logs/*.log
+  fields:
+    log_type: vpn
+  fields_under_root: true
 
 output.kafka:
   hosts: ["localhost:9092"]
   topic: "logs_raw"
-  compression: gzip
+  partition.round_robin:
+    reachable_only: false
   required_acks: 1
-  max_retries: 3
+  compression: gzip
+  max_message_bytes: 1000000
+
+logging.level: warning
+logging.to_files: true
+logging.files:
+  path: /home/syb/Downloads/project/Log_Analysis_AI_Assistant/filebeat_logs
+  name: filebeat
+  keepfiles: 7
