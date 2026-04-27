@@ -15,10 +15,7 @@ from typing import Any, Dict, List, Optional
 # 添加项目根目录到路径
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from src.parsers.regex_parser import RegexParser, COMMON_PATTERNS
-from src.parsers.logparser import LogparserParser, PREDEFINED_PATTERNS
-from src.parsers.json_parser import JSONParser
-from src.parsers.schema import StandardLogSchema
+from src.parsers.parsers import RegexParser, COMMON_PATTERNS, LogparserParser, PREDEFINED_PATTERNS, JSONParser, StandardLogSchema
 from src.parsers.stream_processor import StreamProcessor, DataCleaner, create_default_cleaner
 from src.parsers.interfaces import DataSink, StreamConsumer
 from src.utils.logger import get_logger

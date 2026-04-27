@@ -3,13 +3,24 @@
 
 提供日志解析、清洗、输出的完整流程
 通过接口与外部存储系统交互
+
 """
 from .interfaces import DataSink, DataSource, StreamConsumer, StreamProducer
-from .base import BaseParser
-from .json_parser import JSONParser
-from .regex_parser import RegexParser, COMMON_PATTERNS
-from .logparser import LogparserParser, PREDEFINED_PATTERNS
-from .schema import StandardLogSchema, LogType, LogSeverity, ActionType
+from .parsers import (
+    BaseParser,
+    JSONParser,
+    RegexParser,
+    LogparserParser,
+    StandardLogSchema,
+    FieldExtractor,
+    LogSeverity,
+    LogType,
+    ActionType,
+    COMMON_PATTERNS,
+    PREDEFINED_PATTERNS,
+    create_default_logparser,
+    create_parser,
+)
 from .stream_processor import StreamProcessor, DataCleaner, create_default_cleaner
 from .log_processor import LogProcessor, load_config
 
@@ -26,15 +37,20 @@ __all__ = [
     'RegexParser',
     'LogparserParser',
     
+    # Schema
+    'StandardLogSchema',
+    'FieldExtractor',
+    'LogSeverity',
+    'LogType',
+    'ActionType',
+    
     # 预定义模式
     'COMMON_PATTERNS',
     'PREDEFINED_PATTERNS',
     
-    # Schema
-    'StandardLogSchema',
-    'LogType',
-    'LogSeverity',
-    'ActionType',
+    # 解析器工厂
+    'create_default_logparser',
+    'create_parser',
     
     # 流式处理
     'StreamProcessor',
