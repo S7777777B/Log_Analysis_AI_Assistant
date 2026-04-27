@@ -170,7 +170,7 @@ def create_sidebar():
         st.metric("异常事件数", "68", "-8%")
         
         st.markdown("---")
-        st.caption("© 2024 日志分析 AI 助手")
+        st.caption("© 日志分析 AI 助手")
 
 
 def show_realtime_logs():
