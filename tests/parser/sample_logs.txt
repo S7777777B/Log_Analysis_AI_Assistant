@@ -1,0 +1,87 @@
+# 示例日志数据
+# 用于测试日志解析和清洗功能
+
+# ===== VPN 登录日志 =====
+2024-01-01 08:30:00 LOGIN user=admin ip=192.168.1.100 status=SUCCESS
+2024-01-01 08:35:00 LOGIN user=zhangsan ip=192.168.1.101 status=SUCCESS
+2024-01-01 08:40:00 LOGIN user=lisi ip=192.168.1.102 status=FAILED
+2024-01-01 08:41:00 LOGIN user=lisi ip=192.168.1.102 status=SUCCESS
+2024-01-01 09:00:00 LOGOUT user=admin ip=192.168.1.100 status=SUCCESS
+2024-01-01 12:00:00 LOGIN user=wangwu ip=10.0.0.50 status=SUCCESS
+2024-01-01 12:30:00 LOGOUT user=zhangsan ip=192.168.1.101 status=SUCCESS
+2024-01-01 18:00:00 LOGOUT user=wangwu ip=10.0.0.50 status=SUCCESS
+
+# ===== Fortinet VPN 日志 =====
+date=2024-01-01 time=09:00:00 logid=123456 type=event subtype=vpn level=notice vd=root user=fortinet_user group=SSL_VPN srcip=203.0.113.10 action=ssl-login
+date=2024-01-01 time=17:30:00 logid=123457 type=event subtype=vpn level=notice vd=root user=fortinet_user group=SSL_VPN srcip=203.0.113.10 action=ssl-logout
+
+# ===== OA 系统日志 =====
+2024-01-01 09:00:00 [INFO] user:zhangsan action:submit module:workflow detail:提交请假申请
+2024-01-01 09:15:00 [INFO] user:lisi action:approve module:workflow detail:审批通过
+2024-01-01 10:00:00 [INFO] user:admin action:export module:report detail:导出月度报表
+2024-01-01 14:00:00 [WARNING] user:wangwu action:access module:file detail:访问受限文件
+2024-01-01 15:30:00 [INFO] user:zhangsan action:login module:auth detail:登录系统
+
+# ===== API 调用日志 =====
+2024-01-01T09:00:00Z GET /api/v1/users user=admin status=200 response_time=25.5ms
+2024-01-01T09:01:00Z POST /api/v1/orders user=zhangsan status=201 response_time=150.3ms
+2024-01-01T09:02:00Z GET /api/v1/products user=lisi status=200 response_time=30.2ms
+2024-01-01T09:03:00Z DELETE /api/v1/users/123 user=admin status=403 response_time=5.1ms
+2024-01-01T09:04:00Z PUT /api/v1/settings user=wangwu status=200 response_time=45.8ms
+2024-01-01T09:05:00Z GET /api/v1/reports user=test status=200 response_time=200.0ms
+
+# ===== Nginx 访问日志 =====
+192.168.1.100 - - [01/Jan/2024:10:00:00 +0800] "GET /index.html HTTP/1.1" 200 1234 "-" "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"
+192.168.1.101 - admin [01/Jan/2024:10:01:00 +0800] "POST /api/login HTTP/1.1" 200 567 "http://example.com/" "Mozilla/5.0"
+192.168.1.102 - - [01/Jan/2024:10:02:00 +0800] "GET /static/js/app.js HTTP/1.1" 304 0 "http://example.com/index.html" "Mozilla/5.0"
+10.0.0.50 - - [01/Jan/2024:10:03:00 +0800] "GET /api/users HTTP/1.1" 401 89 "-" "curl/7.68.0"
+192.168.1.100 - - [01/Jan/2024:10:04:00 +0800] "GET /dashboard HTTP/1.1" 200 5678 "-" "Mozilla/5.0"
+
+# ===== Syslog 系统日志 =====
+Jan  1 10:00:00 server01 sshd[12345]: Accepted password for admin from 192.168.1.100 port 22 ssh2
+Jan  1 10:05:00 server01 sshd[12346]: Failed password for root from 203.0.113.50 port 22 ssh2
+Jan  1 10:06:00 server01 sshd[12347]: Failed password for root from 203.0.113.50 port 22 ssh2
+Jan  1 10:07:00 server01 sshd[12348]: Failed password for root from 203.0.113.50 port 22 ssh2
+Jan  1 10:10:00 server01 sudo[12350]: admin : TTY=pts/0 ; PWD=/home/admin ; USER=root ; COMMAND=/bin/systemctl restart nginx
+
+# ===== Windows 事件日志 =====
+2024-01-01 10:00:00 4624 SUCCESS Microsoft-Windows-Security-Auditing An account was logged on. Account Name: admin
+2024-01-01 10:05:00 4625 FAILURE Microsoft-Windows-Security-Auditing An account failed to log on. Account Name: administrator
+2024-01-01 10:10:00 4672 SUCCESS Microsoft-Windows-Security-Auditing Special privileges assigned to new logon. User: admin
+2024-01-01 10:15:00 4720 SUCCESS Microsoft-Windows-Security-Auditing A user account was created. User: new_user
+
+# ===== 数据库查询日志 =====
+2024-01-01 10:00:00 [INFO] user=app_user host=192.168.1.50 query=SELECT * FROM users WHERE id = 123
+2024-01-01 10:01:00 [INFO] user=app_user host=192.168.1.50 query=INSERT INTO orders (user_id, amount) VALUES (123, 100.00)
+2024-01-01 10:02:00 [WARNING] user=admin host=192.168.1.1 query=DROP TABLE temp_data
+2024-01-01 10:03:00 [INFO] user=report_user host=192.168.1.60 query=SELECT COUNT(*) FROM orders WHERE date = '2024-01-01'
+
+# ===== 防火墙日志 =====
+2024-01-01 10:00:00 ALLOW TCP 192.168.1.100:54321 -> 10.0.0.1:443
+2024-01-01 10:01:00 ALLOW TCP 192.168.1.101:54322 -> 10.0.0.1:80
+2024-01-01 10:02:00 DENY TCP 203.0.113.50:12345 -> 192.168.1.1:22
+2024-01-01 10:03:00 DENY TCP 203.0.113.51:12346 -> 192.168.1.1:3389
+2024-01-01 10:04:00 ALLOW UDP 192.168.1.100:53 -> 8.8.8.8:53
+
+# ===== JSON 格式日志 =====
+{"timestamp": "2024-01-01T10:00:00Z", "username": "admin", "action": "LOGIN", "source_ip": "192.168.1.100", "status": "SUCCESS", "user_agent": "Mozilla/5.0"}
+{"timestamp": "2024-01-01T10:01:00Z", "username": "zhangsan", "action": "API_CALL", "source_ip": "192.168.1.101", "uri": "/api/users", "method": "GET", "status_code": 200}
+{"timestamp": "2024-01-01T10:02:00Z", "username": "lisi", "action": "FILE_ACCESS", "source_ip": "192.168.1.102", "file_path": "/data/reports/2024.pdf", "operation": "download"}
+{"timestamp": "2024-01-01T10:03:00Z", "username": "wangwu", "action": "CONFIG_CHANGE", "source_ip": "10.0.0.50", "config_key": "max_connections", "old_value": "100", "new_value": "200"}
+
+# ===== 异常行为示例（用于测试异常检测）=====
+# 短时间内多次登录失败
+2024-01-01 03:00:00 LOGIN user=admin ip=203.0.113.100 status=FAILED
+2024-01-01 03:00:01 LOGIN user=admin ip=203.0.113.100 status=FAILED
+2024-01-01 03:00:02 LOGIN user=admin ip=203.0.113.100 status=FAILED
+2024-01-01 03:00:03 LOGIN user=admin ip=203.0.113.100 status=FAILED
+2024-01-01 03:00:04 LOGIN user=admin ip=203.0.113.100 status=FAILED
+
+# 异地登录
+2024-01-01 08:00:00 LOGIN user=zhangsan ip=192.168.1.100 status=SUCCESS
+2024-01-01 08:30:00 LOGIN user=zhangsan ip=203.0.113.200 status=SUCCESS
+
+# 非工作时间访问
+2024-01-01 02:00:00 LOGIN user=admin ip=192.168.1.1 status=SUCCESS
+2024-01-01 02:05:00 API_CALL user=admin ip=192.168.1.1 uri=/api/users/export status=200
+2024-01-01 02:10:00 FILE_ACCESS user=admin ip=192.168.1.1 file=/data/confidential/secret.pdf operation=download

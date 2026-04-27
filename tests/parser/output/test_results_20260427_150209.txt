@@ -1,0 +1,509 @@
+Parsers 模块功能演示测试报告
+============================================================
+测试时间: 2026-04-27 15:02:09
+============================================================
+
+============================================================
+测试 1: JSON 解析器
+============================================================
+
+输入日志 1:
+  {"timestamp": "2024-01-01T10:00:00Z", "username": "admin", "action": "login", "source_ip": "192.168.1.1", "status": "success"}
+
+解析状态: success
+解析结果:
+{
+  "timestamp": "2024-01-01T10:00:00Z",
+  "username": "admin",
+  "action": "login",
+  "source_ip": "192.168.1.1",
+  "status": "success",
+  "raw_log": "{\"timestamp\": \"2024-01-01T10:00:00Z\", \"username\": \"admin\", \"action\": \"login\", \"source_ip\": \"192.168.1.1\", \"status\": \"success\"}",
+  "parser": "json_test",
+  "parse_status": "success"
+}
+
+------------------------------------------------------------
+
+输入日志 2:
+  {"timestamp": "2024-01-01T10:05:00Z", "username": "zhangsan", "action": "api_call", "source_ip": "10.0.0.5", "method": "GET", "uri": "/api/users"}
+
+解析状态: success
+解析结果:
+{
+  "timestamp": "2024-01-01T10:05:00Z",
+  "username": "zhangsan",
+  "action": "api_call",
+  "source_ip": "10.0.0.5",
+  "method": "GET",
+  "uri": "/api/users",
+  "raw_log": "{\"timestamp\": \"2024-01-01T10:05:00Z\", \"username\": \"zhangsan\", \"action\": \"api_call\", \"source_ip\": \"10.0.0.5\", \"method\": \"GET\", \"uri\": \"/api/users\"}",
+  "parser": "json_test",
+  "parse_status": "success"
+}
+
+------------------------------------------------------------
+
+输入日志 3:
+  {"timestamp": "2024-01-01T10:10:00Z", "username": "lisi", "action": "logout", "source_ip": "172.16.0.10"}
+
+解析状态: success
+解析结果:
+{
+  "timestamp": "2024-01-01T10:10:00Z",
+  "username": "lisi",
+  "action": "logout",
+  "source_ip": "172.16.0.10",
+  "raw_log": "{\"timestamp\": \"2024-01-01T10:10:00Z\", \"username\": \"lisi\", \"action\": \"logout\", \"source_ip\": \"172.16.0.10\"}",
+  "parser": "json_test",
+  "parse_status": "success"
+}
+
+------------------------------------------------------------
+
+
+============================================================
+测试 2: 正则解析器
+============================================================
+
+测试场景: VPN 登录日志
+------------------------------------------------------------
+
+输入日志 1:
+  2024-01-01 10:00:00 LOGIN user=admin ip=192.168.1.1 status=SUCCESS
+
+解析状态: success
+解析结果:
+{
+  "timestamp": "2024-01-01 10:00:00",
+  "log_type": "vpn",
+  "username": "admin",
+  "action": "LOGIN",
+  "source_ip": "192.168.1.1",
+  "status_code": "SUCCESS",
+  "parse_status": "success",
+  "parsed_at": "2026-04-27 15:02:09.671156",
+  "raw_log": "2024-01-01 10:00:00 LOGIN user=admin ip=192.168.1.1 status=SUCCESS",
+  "parser": "regex_VPN 登录日志"
+}
+
+------------------------------------------------------------
+
+输入日志 2:
+  2024-01-01 10:05:00 LOGOUT user=zhangsan ip=10.0.0.5 status=SUCCESS
+
+解析状态: success
+解析结果:
+{
+  "timestamp": "2024-01-01 10:05:00",
+  "log_type": "vpn",
+  "username": "zhangsan",
+  "action": "LOGOUT",
+  "source_ip": "10.0.0.5",
+  "status_code": "SUCCESS",
+  "parse_status": "success",
+  "parsed_at": "2026-04-27 15:02:09.671185",
+  "raw_log": "2024-01-01 10:05:00 LOGOUT user=zhangsan ip=10.0.0.5 status=SUCCESS",
+  "parser": "regex_VPN 登录日志"
+}
+
+------------------------------------------------------------
+
+输入日志 3:
+  2024-01-01 10:10:00 LOGIN user=lisi ip=172.16.0.10 status=FAILED
+
+解析状态: success
+解析结果:
+{
+  "timestamp": "2024-01-01 10:10:00",
+  "log_type": "vpn",
+  "username": "lisi",
+  "action": "LOGIN",
+  "source_ip": "172.16.0.10",
+  "status_code": "FAILED",
+  "parse_status": "success",
+  "parsed_at": "2026-04-27 15:02:09.671204",
+  "raw_log": "2024-01-01 10:10:00 LOGIN user=lisi ip=172.16.0.10 status=FAILED",
+  "parser": "regex_VPN 登录日志"
+}
+
+------------------------------------------------------------
+
+测试场景: Nginx 访问日志
+------------------------------------------------------------
+
+输入日志 1:
+  192.168.1.100 - - [01/Jan/2024:12:00:00 +0800] "GET /api/users HTTP/1.1" 200 1234 "-" "Mozilla/5.0"
+
+解析状态: success
+解析结果:
+{
+  "remote_addr": "192.168.1.100",
+  "remote_user": "-",
+  "timestamp": "01/Jan/2024:12:00:00 +0800",
+  "method": "GET",
+  "uri": "/api/users",
+  "protocol": "HTTP/1.1",
+  "status": "200",
+  "body_bytes_sent": "1234",
+  "http_referer": "-",
+  "http_user_agent": "Mozilla/5.0",
+  "raw_log": "192.168.1.100 - - [01/Jan/2024:12:00:00 +0800] \"GET /api/users HTTP/1.1\" 200 1234 \"-\" \"Mozilla/5.0\"",
+  "parser": "regex_Nginx 访问日志",
+  "parse_status": "partial"
+}
+
+------------------------------------------------------------
+
+输入日志 2:
+  10.0.0.5 - admin [01/Jan/2024:12:05:00 +0800] "POST /api/login HTTP/1.1" 401 567 "-" "curl/7.68.0"
+
+解析状态: success
+解析结果:
+{
+  "remote_addr": "10.0.0.5",
+  "remote_user": "admin",
+  "timestamp": "01/Jan/2024:12:05:00 +0800",
+  "method": "POST",
+  "uri": "/api/login",
+  "protocol": "HTTP/1.1",
+  "status": "401",
+  "body_bytes_sent": "567",
+  "http_referer": "-",
+  "http_user_agent": "curl/7.68.0",
+  "raw_log": "10.0.0.5 - admin [01/Jan/2024:12:05:00 +0800] \"POST /api/login HTTP/1.1\" 401 567 \"-\" \"curl/7.68.0\"",
+  "parser": "regex_Nginx 访问日志",
+  "parse_status": "partial"
+}
+
+------------------------------------------------------------
+
+测试场景: API 调用日志
+------------------------------------------------------------
+
+输入日志 1:
+  2024-01-01T12:00:00Z GET /api/v1/users user=admin status=200 response_time=45.5ms
+
+解析状态: success
+解析结果:
+{
+  "timestamp": "2024-01-01T12:00:00Z",
+  "method": "GET",
+  "uri": "/api/v1/users",
+  "username": "admin",
+  "status": "200",
+  "response_time": "45.5",
+  "raw_log": "2024-01-01T12:00:00Z GET /api/v1/users user=admin status=200 response_time=45.5ms",
+  "parser": "regex_API 调用日志",
+  "parse_status": "partial"
+}
+
+------------------------------------------------------------
+
+输入日志 2:
+  2024-01-01T12:05:00Z POST /api/v1/login user=zhangsan status=401 response_time=120.3ms
+
+解析状态: success
+解析结果:
+{
+  "timestamp": "2024-01-01T12:05:00Z",
+  "method": "POST",
+  "uri": "/api/v1/login",
+  "username": "zhangsan",
+  "status": "401",
+  "response_time": "120.3",
+  "raw_log": "2024-01-01T12:05:00Z POST /api/v1/login user=zhangsan status=401 response_time=120.3ms",
+  "parser": "regex_API 调用日志",
+  "parse_status": "partial"
+}
+
+------------------------------------------------------------
+
+
+============================================================
+测试 3: Logparser 解析器（自动检测模式）
+============================================================
+
+输入日志 1:
+  2024-01-01 10:00:00 LOGIN user=admin ip=192.168.1.1 status=SUCCESS
+
+解析状态: success
+使用模式: logparser_test:vpn_login
+解析结果:
+{
+  "timestamp": "2024-01-01 10:00:00",
+  "log_type": "vpn",
+  "username": "admin",
+  "action": "LOGIN",
+  "source_ip": "192.168.1.1",
+  "status_code": "SUCCESS",
+  "parse_status": "success",
+  "parsed_at": "2026-04-27 15:02:09.673733",
+  "raw_log": "2024-01-01 10:00:00 LOGIN user=admin ip=192.168.1.1 status=SUCCESS",
+  "parser": "logparser_test:vpn_login"
+}
+
+------------------------------------------------------------
+
+输入日志 2:
+  192.168.1.100 - - [01/Jan/2024:12:00:00 +0800] "GET /api/users HTTP/1.1" 200 1234 "-" "Mozilla/5.0"
+
+解析状态: success
+使用模式: logparser_test:nginx_access
+解析结果:
+{
+  "timestamp": "2024-01-01 12:00:00+08:00",
+  "log_type": "network",
+  "username": "unknown",
+  "action": "UNKNOWN",
+  "source_ip": "192.168.1.100",
+  "uri": "/api/users",
+  "method": "GET",
+  "status_code": "200",
+  "parse_status": "success",
+  "parsed_at": "2026-04-27 15:02:09.673804",
+  "raw_log": "192.168.1.100 - - [01/Jan/2024:12:00:00 +0800] \"GET /api/users HTTP/1.1\" 200 1234 \"-\" \"Mozilla/5.0\"",
+  "parser": "logparser_test:nginx_access"
+}
+
+------------------------------------------------------------
+
+输入日志 3:
+  2024-01-01T12:00:00Z GET /api/v1/users user=admin status=200 response_time=45.5ms
+
+解析状态: success
+使用模式: logparser_test:api_request
+解析结果:
+{
+  "timestamp": "2024-01-01 12:00:00",
+  "log_type": "api",
+  "username": "admin",
+  "action": "UNKNOWN",
+  "source_ip": "0.0.0.0",
+  "uri": "/api/v1/users",
+  "method": "GET",
+  "status_code": "200",
+  "response_time": "45.5",
+  "parse_status": "success",
+  "parsed_at": "2026-04-27 15:02:09.673849",
+  "raw_log": "2024-01-01T12:00:00Z GET /api/v1/users user=admin status=200 response_time=45.5ms",
+  "parser": "logparser_test:api_request"
+}
+
+------------------------------------------------------------
+
+
+============================================================
+测试 4: 数据清洗器
+============================================================
+
+输入记录 1:
+  {
+  "user": "  Admin  ",
+  "ip": "192.168.1.1",
+  "action": "LOGIN"
+}
+
+处理状态: cleaned
+清洗结果:
+{
+  "username": "admin",
+  "source_ip": "192.168.1.1",
+  "action": "LOGIN",
+  "severity_level": "INFO"
+}
+
+------------------------------------------------------------
+
+输入记录 2:
+  {
+  "user": "test",
+  "ip": "10.0.0.1",
+  "action": "API_CALL"
+}
+
+处理状态: cleaned
+清洗结果:
+{
+  "username": "test",
+  "source_ip": "10.0.0.1",
+  "action": "API_CALL",
+  "severity_level": "INFO"
+}
+
+------------------------------------------------------------
+
+输入记录 3:
+  {
+  "user": "ZhangSan",
+  "ip": "172.16.0.10",
+  "action": "LOGOUT",
+  "empty_field": ""
+}
+
+处理状态: cleaned
+清洗结果:
+{
+  "username": "zhangsan",
+  "source_ip": "172.16.0.10",
+  "action": "LOGOUT",
+  "empty_field": null,
+  "severity_level": "INFO"
+}
+
+------------------------------------------------------------
+
+
+============================================================
+测试 5: LogProcessor 完整流程（解析 + 清洗）
+============================================================
+
+日志 1:
+  输入: {"timestamp": "2024-01-01T10:00:00Z", "username": "admin", "action": "login", "source_ip": "192.168.1.1"}
+
+  处理状态: success
+
+  解析结果:
+{
+  "timestamp": "2024-01-01T10:00:00Z",
+  "username": "admin",
+  "action": "login",
+  "source_ip": "192.168.1.1",
+  "raw_log": "{\"timestamp\": \"2024-01-01T10:00:00Z\", \"username\": \"admin\", \"action\": \"login\", \"source_ip\": \"192.168.1.1\"}",
+  "parser": "json",
+  "parse_status": "success"
+}
+
+  清洗结果:
+{
+  "user": "admin",
+  "ip": "192.168.1.1",
+  "timestamp": "2024-01-01T10:00:00Z",
+  "action": "login",
+  "raw_log": "{\"timestamp\": \"2024-01-01T10:00:00Z\", \"username\": \"admin\", \"action\": \"login\", \"source_ip\": \"192.168.1.1\"}",
+  "parser": "json",
+  "parse_status": "success",
+  "severity_level": "INFO"
+}
+
+============================================================
+
+日志 2:
+  输入: 2024-01-01 10:05:00 LOGIN user=zhangsan ip=10.0.0.5 status=SUCCESS
+
+  处理状态: success
+
+  解析结果:
+{
+  "timestamp": "2024-01-01 10:05:00",
+  "log_type": "vpn",
+  "username": "zhangsan",
+  "action": "LOGIN",
+  "source_ip": "10.0.0.5",
+  "status_code": "SUCCESS",
+  "parse_status": "success",
+  "parsed_at": "2026-04-27 15:02:09.674876",
+  "raw_log": "2024-01-01 10:05:00 LOGIN user=zhangsan ip=10.0.0.5 status=SUCCESS",
+  "parser": "regex_vpn_login"
+}
+
+  清洗结果:
+{
+  "user": "zhangsan",
+  "ip": "10.0.0.5",
+  "timestamp": "2024-01-01 10:05:00",
+  "log_type": "vpn",
+  "action": "LOGIN",
+  "status_code": "SUCCESS",
+  "parse_status": "success",
+  "parsed_at": "2026-04-27 15:02:09.674876",
+  "raw_log": "2024-01-01 10:05:00 LOGIN user=zhangsan ip=10.0.0.5 status=SUCCESS",
+  "parser": "regex_vpn_login",
+  "severity_level": "INFO"
+}
+
+============================================================
+
+日志 3:
+  输入: 192.168.1.100 - - [01/Jan/2024:12:00:00 +0800] "GET /api/users HTTP/1.1" 200 1234 "-" "Mozilla/5.0"
+
+  处理状态: success
+
+  解析结果:
+{
+  "remote_addr": "192.168.1.100",
+  "remote_user": "-",
+  "timestamp": "01/Jan/2024:12:00:00 +0800",
+  "method": "GET",
+  "uri": "/api/users",
+  "protocol": "HTTP/1.1",
+  "status": "200",
+  "body_bytes_sent": "1234",
+  "http_referer": "-",
+  "http_user_agent": "Mozilla/5.0",
+  "raw_log": "192.168.1.100 - - [01/Jan/2024:12:00:00 +0800] \"GET /api/users HTTP/1.1\" 200 1234 \"-\" \"Mozilla/5.0\"",
+  "parser": "regex_nginx_access",
+  "parse_status": "partial"
+}
+
+  清洗结果:
+{
+  "remote_addr": "192.168.1.100",
+  "remote_user": "-",
+  "timestamp": "01/Jan/2024:12:00:00 +0800",
+  "method": "GET",
+  "uri": "/api/users",
+  "protocol": "HTTP/1.1",
+  "status": 200,
+  "body_bytes_sent": 1234,
+  "http_referer": "-",
+  "http_user_agent": "Mozilla/5.0",
+  "raw_log": "192.168.1.100 - - [01/Jan/2024:12:00:00 +0800] \"GET /api/users HTTP/1.1\" 200 1234 \"-\" \"Mozilla/5.0\"",
+  "parser": "regex_nginx_access",
+  "parse_status": "partial",
+  "severity_level": "INFO"
+}
+
+============================================================
+
+日志 4:
+  输入: 2024-01-01T12:05:00Z POST /api/v1/login user=lisi status=401 response_time=120.3ms
+
+  处理状态: success
+
+  解析结果:
+{
+  "timestamp": "2024-01-01T12:05:00Z",
+  "method": "POST",
+  "uri": "/api/v1/login",
+  "username": "lisi",
+  "status": "401",
+  "response_time": "120.3",
+  "raw_log": "2024-01-01T12:05:00Z POST /api/v1/login user=lisi status=401 response_time=120.3ms",
+  "parser": "regex_api_call",
+  "parse_status": "partial"
+}
+
+  清洗结果:
+{
+  "user": "lisi",
+  "timestamp": "2024-01-01T12:05:00Z",
+  "method": "POST",
+  "uri": "/api/v1/login",
+  "status": 401,
+  "response_time": "120.3",
+  "raw_log": "2024-01-01T12:05:00Z POST /api/v1/login user=lisi status=401 response_time=120.3ms",
+  "parser": "regex_api_call",
+  "parse_status": "partial",
+  "severity_level": "INFO"
+}
+
+============================================================
+
+
+============================================================
+测试总结
+============================================================
+
+✓ 所有测试完成！
+✓ 详细结果已保存到: D:\code\AI_Assistant\Log_Analysis_AI_Assistant\tests\parser\output\test_results_20260427_150209.txt
