@@ -486,18 +486,31 @@ case $choice in
         echo -e "${GREEN}运行采集器单元测试...${NC}"
         echo "测试文件: tests/collectors/test_collectors.py"
         echo ""
+        # 检查 pytest 是否安装
+        if ! command -v pytest &>/dev/null; then
+            echo -e "${YELLOW}⚠️  pytest 未安装，正在安装...${NC}"
+            pip install pytest -q
+        fi
         pytest tests/collectors/test_collectors.py -v
         ;;
     6)
         echo -e "${GREEN}运行存储模块测试...${NC}"
         echo "测试文件: tests/collectors/storage/storage_test.py"
         echo ""
+        if ! command -v pytest &>/dev/null; then
+            echo -e "${YELLOW}⚠️  pytest 未安装，正在安装...${NC}"
+            pip install pytest -q
+        fi
         pytest tests/collectors/storage/storage_test.py -v
         ;;
     7)
         echo -e "${GREEN}运行采集+存储集成测试...${NC}"
         echo "测试文件: tests/collectors/storage/collect_and_storage_test.py"
         echo ""
+        if ! command -v pytest &>/dev/null; then
+            echo -e "${YELLOW}⚠️  pytest 未安装，正在安装...${NC}"
+            pip install pytest -q
+        fi
         pytest tests/collectors/storage/collect_and_storage_test.py -v
         ;;
     # ========== 集成测试 ==========
@@ -524,6 +537,10 @@ case $choice in
     11)
         echo -e "${GREEN}运行所有测试...${NC}"
         echo ""
+        if ! command -v pytest &>/dev/null; then
+            echo -e "${YELLOW}⚠️  pytest 未安装，正在安装...${NC}"
+            pip install pytest -q
+        fi
         pytest tests/ -v
         ;;
     12)
