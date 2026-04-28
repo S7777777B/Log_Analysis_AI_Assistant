@@ -253,6 +253,80 @@ read -p "请输入选项 (1-13): " choice
 
 echo ""
 
+# 安装 Docker 的函数
+install_docker() {
+    echo -e "${YELLOW}Docker 未安装，尝试自动安装...${NC}"
+    
+    if command -v apt &>/dev/null; then
+        # Debian/Ubuntu 系统
+        echo "检测到 Debian/Ubuntu 系统"
+        echo "更新软件源..."
+        sudo apt update -y
+        
+        echo "安装依赖包..."
+        sudo apt install -y apt-transport-https ca-certificates curl software-properties-common
+        
+        echo "添加 Docker GPG 密钥..."
+        curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo gpg --dearmor -o /usr/share/keyrings/docker-archive-keyring.gpg
+        
+        echo "添加 Docker 软件源..."
+        echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/docker-archive-keyring.gpg] https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable" | sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
+        
+        echo "安装 Docker..."
+        sudo apt update -y && sudo apt install -y docker-ce docker-ce-cli containerd.io docker-compose-plugin
+        
+        echo "启动 Docker 服务..."
+        sudo systemctl start docker
+        sudo systemctl enable docker
+        
+        echo "将当前用户加入 docker 组..."
+        sudo usermod -aG docker $USER
+        
+        echo -e "${GREEN}✓ Docker 安装成功${NC}"
+        echo "注意: 需要重新登录或执行 'newgrp docker' 以使权限生效"
+        
+    elif command -v dnf &>/dev/null; then
+        # Fedora/CentOS 8+ 系统
+        echo "检测到 Fedora/CentOS 系统"
+        echo "安装 Docker..."
+        sudo dnf install -y docker docker-compose-plugin
+        
+        echo "启动 Docker 服务..."
+        sudo systemctl start docker
+        sudo systemctl enable docker
+        
+        echo "将当前用户加入 docker 组..."
+        sudo usermod -aG docker $USER
+        
+        echo -e "${GREEN}✓ Docker 安装成功${NC}"
+        
+    elif command -v yum &>/dev/null; then
+        # CentOS 7 系统
+        echo "检测到 CentOS 7 系统"
+        echo "安装 Docker..."
+        sudo yum install -y docker docker-compose
+        
+        echo "启动 Docker 服务..."
+        sudo systemctl start docker
+        sudo systemctl enable docker
+        
+        echo "将当前用户加入 docker 组..."
+        sudo usermod -aG docker $USER
+        
+        echo -e "${GREEN}✓ Docker 安装成功${NC}"
+        
+    else
+        echo -e "${RED}❌ 无法自动安装 Docker，请手动安装${NC}"
+        echo "安装指南:"
+        echo "  - Ubuntu/Debian: https://docs.docker.com/engine/install/ubuntu/"
+        echo "  - CentOS/RHEL: https://docs.docker.com/engine/install/centos/"
+        echo "  - Fedora: https://docs.docker.com/engine/install/fedora/"
+        return 1
+    fi
+    
+    return 0
+}
+
 # 启动 Docker 服务的函数
 start_docker_services() {
     echo -e "${GREEN}启动 Kafka 和 ClickHouse 容器...${NC}"
@@ -266,14 +340,32 @@ start_docker_services() {
     
     echo "检查 Docker 是否已安装..."
     if ! command -v docker &>/dev/null; then
-        echo -e "${RED}❌ Docker 未安装，请先安装 Docker${NC}"
-        return 1
+        echo -e "${YELLOW}⚠️  Docker 未安装${NC}"
+        install_docker
+        if [ $? -ne 0 ]; then
+            return 1
+        fi
+        # 刷新 shell 环境以加载新的 docker 组权限
+        newgrp docker 2>/dev/null || true
+    else
+        echo -e "${GREEN}✓ Docker 已安装${NC}"
     fi
     
     echo "检查 Docker Compose 是否已安装..."
     if ! command -v docker-compose &>/dev/null && ! docker compose version &>/dev/null; then
-        echo -e "${RED}❌ Docker Compose 未安装${NC}"
-        return 1
+        echo -e "${YELLOW}⚠️  Docker Compose 未安装，尝试安装...${NC}"
+        if command -v apt &>/dev/null; then
+            sudo apt install -y docker-compose-plugin
+        elif command -v dnf &>/dev/null; then
+            sudo dnf install -y docker-compose-plugin
+        elif command -v yum &>/dev/null; then
+            sudo yum install -y docker-compose
+        else
+            echo -e "${RED}❌ 无法安装 Docker Compose${NC}"
+            return 1
+        fi
+    else
+        echo -e "${GREEN}✓ Docker Compose 已安装${NC}"
     fi
     
     echo "停止并清理旧容器..."
