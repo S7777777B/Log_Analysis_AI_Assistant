@@ -383,18 +383,10 @@ start_docker_services() {
     fi
     
     echo "停止并清理旧容器..."
-    if command -v docker-compose &>/dev/null; then
-        docker-compose -f "$COMPOSE_FILE" down -v 2>/dev/null || true
-    else
-        docker compose -f "$COMPOSE_FILE" down -v 2>/dev/null || true
-    fi
+    $DOCKER_COMPOSE_CMD -f "$COMPOSE_FILE" down -v 2>/dev/null || true
     
     echo "启动容器..."
-    if command -v docker-compose &>/dev/null; then
-        docker-compose -f "$COMPOSE_FILE" up -d
-    else
-        docker compose -f "$COMPOSE_FILE" up -d
-    fi
+    $DOCKER_COMPOSE_CMD -f "$COMPOSE_FILE" up -d
     
     if [ $? -eq 0 ]; then
         echo -e "${GREEN}✓ 容器启动成功${NC}"
@@ -449,11 +441,19 @@ stop_docker_services() {
         return 1
     fi
     
-    if command -v docker-compose &>/dev/null; then
-        docker-compose -f "$COMPOSE_FILE" down -v
+    # 检查 Docker 权限
+    if ! docker ps &>/dev/null; then
+        if sudo docker ps &>/dev/null; then
+            DOCKER_COMPOSE_CMD="sudo docker compose"
+        else
+            echo -e "${RED}❌ Docker 服务未运行或无法访问${NC}"
+            return 1
+        fi
     else
-        docker compose -f "$COMPOSE_FILE" down -v
+        DOCKER_COMPOSE_CMD="docker compose"
     fi
+    
+    $DOCKER_COMPOSE_CMD -f "$COMPOSE_FILE" down -v
     
     if [ $? -eq 0 ]; then
         echo -e "${GREEN}✓ 容器已停止并清理${NC}"
