@@ -226,17 +226,139 @@ echo ""
 # 提供操作选择
 # ===============================================
 echo -e "${YELLOW}请选择要执行的操作：${NC}"
+echo "========== 运行服务 =========="
 echo "1. 运行主程序 (测试 storage 和 collector 接口)"
 echo "2. 启动可视化仪表板"
-echo "3. 运行单元测试"
-echo "4. 仅显示项目信息"
-echo "5. 退出"
+echo ""
+echo "========== Docker 服务 =========="
+echo "3. 启动 Kafka + ClickHouse 容器"
+echo "4. 停止 Kafka + ClickHouse 容器"
+echo ""
+echo "========== 单元测试 =========="
+echo "5. 运行采集器单元测试 (test_collectors.py)"
+echo "6. 运行存储模块测试 (storage_test.py)"
+echo "7. 运行采集+存储集成测试 (collect_and_storage_test.py)"
+echo ""
+echo "========== 集成测试 =========="
+echo "8. 运行完整集成测试 (integration_test_collectors.py)"
+echo "9. 生成 VPN 测试日志 (gen_vpn_logs.py)"
+echo "10. 模拟日志生成 (simulate_logs.py)"
+echo ""
+echo "========== 其他 =========="
+echo "11. 运行所有测试"
+echo "12. 仅显示项目信息"
+echo "13. 退出"
 
-read -p "请输入选项 (1-5): " choice
+read -p "请输入选项 (1-13): " choice
 
 echo ""
 
+# 启动 Docker 服务的函数
+start_docker_services() {
+    echo -e "${GREEN}启动 Kafka 和 ClickHouse 容器...${NC}"
+    
+    COMPOSE_FILE="$PROJECT_ROOT/tests/collectors/docker-compose-full.yml"
+    
+    if [ ! -f "$COMPOSE_FILE" ]; then
+        echo -e "${RED}❌ 未找到 Docker Compose 文件: $COMPOSE_FILE${NC}"
+        return 1
+    fi
+    
+    echo "检查 Docker 是否已安装..."
+    if ! command -v docker &>/dev/null; then
+        echo -e "${RED}❌ Docker 未安装，请先安装 Docker${NC}"
+        return 1
+    fi
+    
+    echo "检查 Docker Compose 是否已安装..."
+    if ! command -v docker-compose &>/dev/null && ! docker compose version &>/dev/null; then
+        echo -e "${RED}❌ Docker Compose 未安装${NC}"
+        return 1
+    fi
+    
+    echo "停止并清理旧容器..."
+    if command -v docker-compose &>/dev/null; then
+        docker-compose -f "$COMPOSE_FILE" down -v 2>/dev/null || true
+    else
+        docker compose -f "$COMPOSE_FILE" down -v 2>/dev/null || true
+    fi
+    
+    echo "启动容器..."
+    if command -v docker-compose &>/dev/null; then
+        docker-compose -f "$COMPOSE_FILE" up -d
+    else
+        docker compose -f "$COMPOSE_FILE" up -d
+    fi
+    
+    if [ $? -eq 0 ]; then
+        echo -e "${GREEN}✓ 容器启动成功${NC}"
+        echo ""
+        echo -e "${BLUE}等待服务就绪...${NC}"
+        
+        # 等待 Kafka 就绪
+        echo "等待 Kafka (端口 9092)..."
+        for i in {1..30}; do
+            if nc -z localhost 9092 2>/dev/null; then
+                echo -e "${GREEN}✓ Kafka 就绪${NC}"
+                break
+            fi
+            sleep 2
+            echo -n "."
+        done
+        echo ""
+        
+        # 等待 ClickHouse 就绪
+        echo "等待 ClickHouse (端口 8123)..."
+        for i in {1..30}; do
+            if nc -z localhost 8123 2>/dev/null; then
+                echo -e "${GREEN}✓ ClickHouse 就绪${NC}"
+                break
+            fi
+            sleep 2
+            echo -n "."
+        done
+        echo ""
+        
+        echo ""
+        echo -e "${GREEN}🎉 所有服务启动完成！${NC}"
+        echo -e "${BLUE}服务信息:${NC}"
+        echo "  - Kafka: localhost:9092"
+        echo "  - ClickHouse: localhost:8123"
+        echo ""
+        echo "现在可以运行主程序测试接口了"
+    else
+        echo -e "${RED}❌ 容器启动失败${NC}"
+        return 1
+    fi
+}
+
+# 停止 Docker 服务的函数
+stop_docker_services() {
+    echo -e "${YELLOW}停止 Kafka 和 ClickHouse 容器...${NC}"
+    
+    COMPOSE_FILE="$PROJECT_ROOT/tests/collectors/docker-compose-full.yml"
+    
+    if [ ! -f "$COMPOSE_FILE" ]; then
+        echo -e "${RED}❌ 未找到 Docker Compose 文件: $COMPOSE_FILE${NC}"
+        return 1
+    fi
+    
+    if command -v docker-compose &>/dev/null; then
+        docker-compose -f "$COMPOSE_FILE" down -v
+    else
+        docker compose -f "$COMPOSE_FILE" down -v
+    fi
+    
+    if [ $? -eq 0 ]; then
+        echo -e "${GREEN}✓ 容器已停止并清理${NC}"
+    else
+        echo -e "${RED}❌ 停止容器失败${NC}"
+        return 1
+    fi
+}
+
 case $choice in
+    # ========== 运行服务 ==========
     1)
         echo -e "${GREEN}启动主程序...${NC}"
         echo "按 Ctrl+C 停止"
@@ -250,11 +372,59 @@ case $choice in
         echo ""
         streamlit run src/visualization/dashboard.py --server.port 8501 --server.address localhost
         ;;
+    # ========== Docker 服务 ==========
     3)
-        echo -e "${GREEN}运行单元测试...${NC}"
-        pytest tests/ -v
+        start_docker_services
         ;;
     4)
+        stop_docker_services
+        ;;
+    # ========== 单元测试 ==========
+    5)
+        echo -e "${GREEN}运行采集器单元测试...${NC}"
+        echo "测试文件: tests/collectors/test_collectors.py"
+        echo ""
+        pytest tests/collectors/test_collectors.py -v
+        ;;
+    6)
+        echo -e "${GREEN}运行存储模块测试...${NC}"
+        echo "测试文件: tests/collectors/storage/storage_test.py"
+        echo ""
+        pytest tests/collectors/storage/storage_test.py -v
+        ;;
+    7)
+        echo -e "${GREEN}运行采集+存储集成测试...${NC}"
+        echo "测试文件: tests/collectors/storage/collect_and_storage_test.py"
+        echo ""
+        pytest tests/collectors/storage/collect_and_storage_test.py -v
+        ;;
+    # ========== 集成测试 ==========
+    8)
+        echo -e "${GREEN}运行完整集成测试...${NC}"
+        echo "测试文件: tests/collectors/integration_test_collectors.py"
+        echo "注意: 需要提前启动 Kafka 和 Filebeat"
+        echo ""
+        python tests/collectors/integration_test_collectors.py
+        ;;
+    9)
+        echo -e "${GREEN}生成 VPN 测试日志...${NC}"
+        echo "脚本: tests/collectors/gen_vpn_logs.py"
+        echo ""
+        python tests/collectors/gen_vpn_logs.py --start 2026-04-01 --days 7 --count 50 --outdir tests/collectors/sample_logs
+        ;;
+    10)
+        echo -e "${GREEN}模拟日志生成...${NC}"
+        echo "脚本: tests/collectors/simulate_logs.py"
+        echo ""
+        python tests/collectors/simulate_logs.py
+        ;;
+    # ========== 其他 ==========
+    11)
+        echo -e "${GREEN}运行所有测试...${NC}"
+        echo ""
+        pytest tests/ -v
+        ;;
+    12)
         echo -e "${BLUE}项目信息:${NC}"
         echo "------------------------"
         echo "项目名称: 日志分析 AI 助手"
@@ -262,10 +432,18 @@ case $choice in
         echo "虚拟环境: $VENV_DIR"
         echo "Python 版本: $PYTHON_VERSION"
         echo "配置文件: $ENV_FILE"
+        echo ""
+        echo "测试文件列表:"
+        echo "  - tests/collectors/test_collectors.py (采集器单元测试)"
+        echo "  - tests/collectors/storage/storage_test.py (存储模块测试)"
+        echo "  - tests/collectors/storage/collect_and_storage_test.py (采集+存储集成测试)"
+        echo "  - tests/collectors/integration_test_collectors.py (完整集成测试)"
+        echo "  - tests/collectors/gen_vpn_logs.py (VPN日志生成器)"
+        echo "  - tests/collectors/simulate_logs.py (日志模拟器)"
         echo "------------------------"
         echo -e "${GREEN}✓ 检查完成${NC}"
         ;;
-    5)
+    13)
         echo -e "${CYAN}退出脚本${NC}"
         exit 0
         ;;
