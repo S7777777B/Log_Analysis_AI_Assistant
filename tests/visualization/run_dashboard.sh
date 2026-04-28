@@ -1,51 +1,74 @@
 #!/bin/bash
 
 # 可视化仪表板启动脚本Linux版本
-# 使用方法：./tests/visualization/run_dashboard.sh
+# 使用方法：chmod +x run_dashboard.sh给执行权限
+# ./tests/visualization/run_dashboard.sh
 
 echo "========================================"
 echo "  日志分析 AI 助手 - 可视化仪表板"
 echo "========================================"
 echo ""
 
-# 检查虚拟环境是否存在
-if [ ! -d "./venv" ]; then
-    echo "❌ 虚拟环境未找到，请先创建虚拟环境..."
+# 检查 Python 环境
+echo "[1/5] 检查 Python 环境..."
+if ! command -v python3 &> /dev/null; then
+    echo "❌ Python 3 未安装，请先安装 Python 3.9 或更高版本"
     echo ""
-    echo "执行以下命令创建虚拟环境："
-    echo "  python3 -m venv venv"
-    echo "  source venv/bin/activate"
-    echo "  pip install streamlit"
+    echo "在 Debian/Ubuntu 上执行：sudo apt update && sudo apt install python3 python3-venv python3-pip"
+    echo "在 CentOS/RHEL 上执行：sudo yum install python3 python3-venv python3-pip"
     echo ""
     exit 1
 fi
 
-# 激活虚拟环境
-echo "[1/3] 激活虚拟环境..."
-source venv/bin/activate
+python_version=$(python3 --version 2>&1)
+echo "✓ Python 已安装：$python_version"
 
-# 检查 Streamlit 是否安装
-echo "[2/3] 检查 Streamlit 依赖..."
-streamlit_version=$(python3 -c "import streamlit; print(streamlit.__version__)" 2>&1)
-if [ $? -ne 0 ]; then
-    echo "⚠️  Streamlit 未安装，正在安装..."
-    pip install streamlit==1.56.0
+# 检查虚拟环境是否存在
+if [ ! -d "./venv" ]; then
+    echo ""
+    echo "[2/5] 虚拟环境未找到，正在创建..."
+    python3 -m venv venv
     if [ $? -ne 0 ]; then
-        echo "✗ 安装失败，请手动运行：pip install streamlit"
+        echo "✗ 虚拟环境创建失败，请检查权限"
         exit 1
     fi
-    echo "✓ Streamlit 安装完成"
+    echo "✓ 虚拟环境创建成功"
 else
-    echo "✓ Streamlit 已安装：v$streamlit_version"
+    echo "[2/5] 虚拟环境已存在"
+fi
+
+# 激活虚拟环境
+echo "[3/5] 激活虚拟环境..."
+source venv/bin/activate
+if [ $? -ne 0 ]; then
+    echo "✗ 虚拟环境激活失败"
+    exit 1
+fi
+
+# 升级 pip
+echo "[4/5] 升级 pip..."
+pip install --upgrade pip > /dev/null 2>&1
+if [ $? -eq 0 ]; then
+    echo "✓ pip 升级成功"
+else
+    echo "⚠️ pip 升级失败，继续执行"
+fi
+
+# 安装项目依赖
+echo "[5/5] 安装项目依赖..."
+if [ -f "requirements.txt" ]; then
+    pip install -r requirements.txt
+    if [ $? -ne 0 ]; then
+        echo "✗ 依赖安装失败，请检查错误信息"
+        exit 1
+    fi
+    echo "✓ 项目依赖安装完成"
 fi
 
 # 启动 Streamlit
-echo "[3/3] 启动可视化仪表板..."
 echo ""
 echo "========================================"
-echo "  ✅ 仪表板启动成功！"
-echo "  🌐 访问地址：http://localhost:8501"
-echo "  按 Ctrl+C 停止服务"
+echo "  🔄 启动可视化仪表板..."
 echo "========================================"
 echo ""
 
