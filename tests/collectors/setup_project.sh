@@ -283,7 +283,6 @@ install_docker() {
         sudo usermod -aG docker $USER
         
         echo -e "${GREEN}✓ Docker 安装成功${NC}"
-        echo "注意: 需要重新登录或执行 'newgrp docker' 以使权限生效"
         
     elif command -v dnf &>/dev/null; then
         # Fedora/CentOS 8+ 系统
@@ -339,20 +338,35 @@ start_docker_services() {
     fi
     
     echo "检查 Docker 是否已安装..."
+    DOCKER_WAS_INSTALLED=false
     if ! command -v docker &>/dev/null; then
         echo -e "${YELLOW}⚠️  Docker 未安装${NC}"
         install_docker
         if [ $? -ne 0 ]; then
             return 1
         fi
-        # 刷新 shell 环境以加载新的 docker 组权限
-        newgrp docker 2>/dev/null || true
+        DOCKER_WAS_INSTALLED=true
     else
         echo -e "${GREEN}✓ Docker 已安装${NC}"
     fi
     
+    # 检查 Docker 是否可运行（使用 sudo 或用户权限）
+    echo "检查 Docker 运行权限..."
+    if ! docker ps &>/dev/null; then
+        if ! sudo docker ps &>/dev/null; then
+            echo -e "${RED}❌ Docker 服务未运行或无法访问${NC}"
+            return 1
+        fi
+        echo -e "${YELLOW}⚠️  Docker 需要 sudo 权限${NC}"
+        DOCKER_CMD="sudo docker"
+        DOCKER_COMPOSE_CMD="sudo docker compose"
+    else
+        DOCKER_CMD="docker"
+        DOCKER_COMPOSE_CMD="docker compose"
+    fi
+    
     echo "检查 Docker Compose 是否已安装..."
-    if ! command -v docker-compose &>/dev/null && ! docker compose version &>/dev/null; then
+    if ! command -v docker-compose &>/dev/null && ! $DOCKER_COMPOSE_CMD version &>/dev/null; then
         echo -e "${YELLOW}⚠️  Docker Compose 未安装，尝试安装...${NC}"
         if command -v apt &>/dev/null; then
             sudo apt install -y docker-compose-plugin
