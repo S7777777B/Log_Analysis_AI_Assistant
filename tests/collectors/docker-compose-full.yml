@@ -26,8 +26,8 @@ services:
   # ClickHouse 服务
   clickhouse:
     image: clickhouse/clickhouse-server:latest
+    user: "101:101"
     container_name: clickhouse-server
-    command: ["clickhouse-server", "--config-file=/etc/clickhouse-server/config.xml"]
     environment:
       CLICKHOUSE_USER: default
       CLICKHOUSE_PASSWORD: ""
@@ -38,8 +38,6 @@ services:
       - "9000:9000"
     volumes:
       - clickhouse-data:/var/lib/clickhouse
-    tty: true
-    stdin_open: true
     deploy:
       resources:
         limits:
