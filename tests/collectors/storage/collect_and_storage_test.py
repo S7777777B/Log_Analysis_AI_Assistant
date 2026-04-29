@@ -414,6 +414,19 @@ def test_collect_and_store() -> bool:
     """测试采集器消费 Kafka 并存入 ClickHouse"""
     fmt.print_step(5, "采集日志并存入 ClickHouse")
 
+    # 先创建数据库（如果不存在）
+    import clickhouse_connect
+    admin_client = clickhouse_connect.get_client(
+        host=CLICKHOUSE_HOST,
+        port=CLICKHOUSE_PORT,
+        username='default',
+        password=CLICKHOUSE_PASSWORD,
+        connect_timeout=5
+    )
+    admin_client.command(f"CREATE DATABASE IF NOT EXISTS {CLICKHOUSE_DATABASE}")
+    admin_client.close()
+    fmt.print_info(f"数据库 '{CLICKHOUSE_DATABASE}' 已就绪")
+
     # 初始化 ClickHouse 客户端
     ch_client = ClickHouseClient({
         'host': CLICKHOUSE_HOST,
