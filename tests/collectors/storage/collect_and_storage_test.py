@@ -156,6 +156,7 @@ services:
 
   clickhouse:
     image: clickhouse/clickhouse-server:latest
+    user: "101:101"
     container_name: collect_storage_clickhouse
     ports:
       - "8123:8123"
