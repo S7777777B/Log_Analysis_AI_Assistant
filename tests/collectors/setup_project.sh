@@ -348,12 +348,13 @@ start_docker_services() {
     
     # 检查 Docker 是否可运行（使用 sudo 或用户权限）
     echo "检查 Docker 运行权限..."
+    echo -e "${YELLOW}⚠️  Docker 需要 sudo 权限${NC}"
     if ! docker ps &>/dev/null; then
         if ! sudo docker ps &>/dev/null; then
             echo -e "${RED}❌ Docker 服务未运行或无法访问${NC}"
             return 1
         fi
-        echo -e "${YELLOW}⚠️  Docker 需要 sudo 权限${NC}"
+        
         DOCKER_CMD="sudo docker"
         DOCKER_COMPOSE_CMD="sudo docker compose"
     else
@@ -399,7 +400,8 @@ start_docker_services() {
         
         # 等待 ClickHouse 就绪 - 先检查容器是否运行
         echo "等待 ClickHouse (端口 8123)..."
-        for i in {1..30}; do
+        clickhouse_ready=false
+        for i in {1..60}; do
             # 检查容器是否在运行
             if ! $DOCKER_CMD inspect -f '{{.State.Running}}' clickhouse-server 2>/dev/null | grep -q "true"; then
                 echo -n "!"
@@ -409,14 +411,27 @@ start_docker_services() {
             # 检查端口
             if nc -z localhost 8123 2>/dev/null; then
                 # 额外检查 HTTP 接口
-                if curl -s http://localhost:8123/ping | grep -q "OK"; then
+                response=$(curl -s http://localhost:8123/ping 2>/dev/null)
+                if echo "$response" | grep -q "OK"; then
                     echo -e "${GREEN}✓ ClickHouse 就绪${NC}"
+                    clickhouse_ready=true
                     break
                 fi
             fi
-            echo -n "."
+            if [ $((i % 5)) -eq 0 ]; then
+                echo -n "[$i]"
+            else
+                echo -n "."
+            fi
             sleep 2
         done
+        
+        if [ "$clickhouse_ready" = false ]; then
+            echo ""
+            echo -e "${YELLOW}⚠️  ClickHouse 可能未完全就绪，建议手动检查${NC}"
+            echo "  查看日志: sudo docker logs clickhouse-server"
+            echo "  手动测试: curl http://localhost:8123/ping"
+        fi
         
         echo ""
         

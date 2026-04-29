@@ -25,22 +25,33 @@ services:
 
   # ClickHouse 服务
   clickhouse:
-    image: yandex/clickhouse-server:latest
+    image: clickhouse/clickhouse-server:latest
     container_name: clickhouse-server
+    command: ["clickhouse-server", "--config-file=/etc/clickhouse-server/config.xml"]
     environment:
       CLICKHOUSE_USER: default
       CLICKHOUSE_PASSWORD: ""
       CLICKHOUSE_DB: log_analysis
+      CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: 1
     ports:
       - "8123:8123"
       - "9000:9000"
     volumes:
       - clickhouse-data:/var/lib/clickhouse
+    tty: true
+    stdin_open: true
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+        reservations:
+          memory: 1G
     healthcheck:
-      test: ["CMD", "wget", "-q", "--spider", "http://localhost:8123/ping"]
-      interval: 5s
-      timeout: 10s
-      retries: 10
+      test: ["CMD-SHELL", "curl -s http://localhost:8123/ping | grep -q OK"]
+      interval: 10s
+      timeout: 30s
+      retries: 20
+      start_period: 30s
 
   # ZooKeeper (可选，用于某些 Kafka 配置)
   zookeeper:
