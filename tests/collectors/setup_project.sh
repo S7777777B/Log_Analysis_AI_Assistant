@@ -390,25 +390,56 @@ start_docker_services() {
         
         # 等待服务就绪
         echo "等待服务启动..."
-        echo "等待 ClickHouse 就绪..."
-        for i in {1..20}; do
-            if $DOCKER_CMD exec clickhouse-server wget -q --spider http://localhost:8123/ping 2>/dev/null; then
-                echo -e "${GREEN}✓ ClickHouse 就绪${NC}"
-                break
+        
+        # 先检查容器状态
+        echo "检查容器状态..."
+        $DOCKER_COMPOSE_CMD -f "$COMPOSE_FILE" ps
+        
+        echo ""
+        
+        # 等待 ClickHouse 就绪 - 先检查容器是否运行
+        echo "等待 ClickHouse (端口 8123)..."
+        for i in {1..30}; do
+            # 检查容器是否在运行
+            if ! $DOCKER_CMD inspect -f '{{.State.Running}}' clickhouse-server 2>/dev/null | grep -q "true"; then
+                echo -n "!"
+                sleep 2
+                continue
+            fi
+            # 检查端口
+            if nc -z localhost 8123 2>/dev/null; then
+                # 额外检查 HTTP 接口
+                if curl -s http://localhost:8123/ping | grep -q "OK"; then
+                    echo -e "${GREEN}✓ ClickHouse 就绪${NC}"
+                    break
+                fi
             fi
             echo -n "."
-            sleep 3
+            sleep 2
         done
         
         echo ""
-        echo "等待 Kafka 就绪..."
+        
+        # 等待 Kafka 就绪 - 使用端口检查
+        echo "等待 Kafka (端口 9092)..."
         for i in {1..30}; do
-            if $DOCKER_CMD exec kafka-kraft kafka-broker-api-versions --bootstrap-server localhost:9092 2>/dev/null; then
-                echo -e "${GREEN}✓ Kafka 就绪${NC}"
+            # 检查容器是否在运行
+            if ! $DOCKER_CMD inspect -f '{{.State.Running}}' kafka-kraft 2>/dev/null | grep -q "true"; then
+                echo -n "!"
+                sleep 2
+                continue
+            fi
+            if nc -z localhost 9092 2>/dev/null; then
+                # 使用 kafka-topics.sh 验证（在容器内执行）
+                if $DOCKER_CMD exec kafka-kraft /opt/kafka/bin/kafka-topics.sh --list --bootstrap-server localhost:9092 2>/dev/null; then
+                    echo -e "${GREEN}✓ Kafka 就绪${NC}"
+                else
+                    echo -e "${GREEN}✓ Kafka 端口已开放${NC}"
+                fi
                 break
             fi
             echo -n "."
-            sleep 3
+            sleep 2
         done
         
         echo ""
