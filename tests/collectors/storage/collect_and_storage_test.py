@@ -410,22 +410,100 @@ logging.files:
 
 
 # -------------------- 采集并存储测试 --------------------
+def _produce_test_logs_to_kafka(count: int = 15):
+    """直接向 Kafka 写入测试日志（不依赖 Filebeat）"""
+    from kafka import KafkaProducer
+    import json
+    
+    # 定义硬编码的测试数据模板
+    TEST_LOG_TEMPLATES = [
+        {"log_type": "vpn", "action": "login", "status": "success", "user_prefix": "admin"},
+        {"log_type": "vpn", "action": "logout", "status": "success", "user_prefix": "user"},
+        {"log_type": "vpn", "action": "login", "status": "failed", "user_prefix": "guest"},
+        {"log_type": "vpn", "action": "connect", "status": "success", "user_prefix": "admin"},
+        {"log_type": "vpn", "action": "disconnect", "status": "success", "user_prefix": "user"},
+    ]
+    
+    fmt.print_info(f"========== 开始向 Kafka 写入测试数据 ==========")
+    fmt.print_info(f"目标 Topic: {KAFKA_TOPIC}")
+    fmt.print_info(f"目标 Broker: {KAFKA_BOOTSTRAP}")
+    fmt.print_info(f"计划写入: {count} 条测试日志")
+    fmt.print_info(f"--------------------------------------------")
+    
+    try:
+        producer = KafkaProducer(
+            bootstrap_servers=KAFKA_BOOTSTRAP.split(','),
+            value_serializer=lambda v: json.dumps(v).encode('utf-8'),
+            max_block_ms=10000
+        )
+        
+        for i in range(count):
+            template = TEST_LOG_TEMPLATES[i % len(TEST_LOG_TEMPLATES)]
+            log_entry = {
+                '@timestamp': datetime.now().isoformat(),
+                'message': f"[TEST DATA] {template['log_type'].upper()} {template['action']} - {template['user_prefix']}{i:03d} from 192.168.1.{i} ({template['status']})",
+                'fields': {
+                    'log_type': template['log_type']
+                },
+                'log': {
+                    'file': {
+                        'path': f'/var/log/vpn/test_{template["log_type"]}_{i}.log'
+                    }
+                },
+                'host': {
+                    'name': 'test-host-01'
+                },
+                'user': f'{template["user_prefix"]}{i:03d}',
+                'src_ip': f'192.168.1.{i}',
+                'action': template['action'],
+                'status': template['status'],
+                '_test_data': True,  # 标记为测试数据
+                '_test_index': i     # 测试数据索引
+            }
+            
+            # 打印每条写入的测试数据（确保可见）
+            fmt.print_info(f"写入 #{i+1}: [{log_entry['log_type']}] {log_entry['action']} | {log_entry['user']} | {log_entry['status']}")
+            producer.send(KAFKA_TOPIC, value=log_entry)
+        
+        producer.flush()
+        producer.close()
+        
+        fmt.print_info(f"--------------------------------------------")
+        fmt.print_success(f"成功向 Kafka 写入 {count} 条测试日志")
+        fmt.print_info(f"========== 测试数据写入完成 ==========")
+        return True
+    except Exception as e:
+        fmt.print_error(f"写入 Kafka 失败: {e}")
+        return False
+
+
 def test_collect_and_store() -> bool:
     """测试采集器消费 Kafka 并存入 ClickHouse"""
     fmt.print_step(5, "采集日志并存入 ClickHouse")
 
     # 先创建数据库（如果不存在）
-    import clickhouse_connect
-    admin_client = clickhouse_connect.get_client(
-        host=CLICKHOUSE_HOST,
-        port=CLICKHOUSE_PORT,
-        username='default',
-        password=CLICKHOUSE_PASSWORD,
-        connect_timeout=5
-    )
-    admin_client.command(f"CREATE DATABASE IF NOT EXISTS {CLICKHOUSE_DATABASE}")
-    admin_client.close()
-    fmt.print_info(f"数据库 '{CLICKHOUSE_DATABASE}' 已就绪")
+    fmt.print_info("正在连接 ClickHouse...")
+    try:
+        import clickhouse_connect
+        admin_client = clickhouse_connect.get_client(
+            host=CLICKHOUSE_HOST,
+            port=CLICKHOUSE_PORT,
+            username='default',
+            password=CLICKHOUSE_PASSWORD,
+            connect_timeout=5,
+            send_receive_timeout=5
+        )
+        admin_client.command(f"CREATE DATABASE IF NOT EXISTS {CLICKHOUSE_DATABASE}")
+        admin_client.close()
+        fmt.print_success(f"数据库 '{CLICKHOUSE_DATABASE}' 已就绪")
+    except Exception as e:
+        fmt.print_error(f"连接 ClickHouse 失败: {e}")
+        return False
+
+    # 直接向 Kafka 写入测试数据（不依赖 Filebeat）
+    if not _produce_test_logs_to_kafka(count=15):
+        fmt.print_error("无法写入测试数据到 Kafka")
+        return False
 
     # 初始化 ClickHouse 客户端
     ch_client = ClickHouseClient({
