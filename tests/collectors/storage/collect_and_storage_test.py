@@ -40,7 +40,7 @@ CLICKHOUSE_HOST = "localhost"
 CLICKHOUSE_PORT = 8123
 CLICKHOUSE_DATABASE = "test_logs"
 CLICKHOUSE_TABLE = "raw_logs"
-CLICKHOUSE_PASSWORD = "clickhouse"
+CLICKHOUSE_PASSWORD = ""
 
 # 确保目录存在
 SAMPLE_LOGS_DIR.mkdir(exist_ok=True)
@@ -164,7 +164,7 @@ services:
     environment:
       CLICKHOUSE_DB: test_logs
       CLICKHOUSE_USER: default
-      CLICKHOUSE_PASSWORD: clickhouse
+      CLICKHOUSE_PASSWORD: ""
       CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: 1
     ulimits:
       nofile:
