@@ -224,16 +224,18 @@ def wait_for_services():
     fmt.print_info("等待 ClickHouse...")
     for i in range(1, 61):
         try:
+            # 先不指定数据库连接
             client = clickhouse_connect.get_client(
                 host=CLICKHOUSE_HOST,
                 port=CLICKHOUSE_PORT,
                 username='default',
                 password=CLICKHOUSE_PASSWORD,
-                database=CLICKHOUSE_DATABASE,
                 connect_timeout=3
             )
             result = client.command("SELECT 1")
             if result == 1:
+                # 创建数据库（如果不存在）
+                client.command(f"CREATE DATABASE IF NOT EXISTS {CLICKHOUSE_DATABASE}")
                 client.close()
                 break
             client.close()
