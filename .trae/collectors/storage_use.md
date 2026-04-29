@@ -15,11 +15,11 @@
 
 | 组件                   | 最低版本 | 测试版本 | 用途                     |
 | ---------------------- | -------- | -------- | ------------------------ |
-| Python                 | 3.9      | 3.13.x   | 运行存储客户端           |
+| Python                 | 3.9      | 3.10.x   | 运行存储客户端           |
 | clickhouse-connect     | 0.7.0    | 0.7.16   | ClickHouse 驱动          |
 | kafka-python           | 2.3.0    | 2.3.0    | Kafka 客户端             |
 | elasticsearch          | 8.0.0    | 8.17.0   | Elasticsearch 客户端     |
-| Apache Kafka           | 3.0      | 4.2.0    | 消息队列                 |
+| Apache Kafka           | 3.0      | 3.7.0    | 消息队列                 |
 | ClickHouse             | 22.0     | 24.x     | 列式数据库               |
 | Elasticsearch          | 8.0      | 8.17.0   | 搜索引擎（可选）         |
 | Docker / Docker Compose| 20.10    | 最新     | 测试环境容器编排         |

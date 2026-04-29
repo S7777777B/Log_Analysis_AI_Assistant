@@ -486,3 +486,6 @@ streamlit run dashboard.py --server.port 8502
 ---
 
 **提示**: 将此文件放在手边，开发时快速查阅！
+
+**更新日期**: 2026-04-29
+**当前状态**: 数据存储模块（Kafka + ClickHouse）测试通过
