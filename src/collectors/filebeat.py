@@ -61,8 +61,12 @@ class FilebeatCollector(BaseCollector):
             raw_value = msg.value
             # 尝试解析为 JSON，失败则作为纯文本处理
             try:
-                parsed = json.loads(raw_value)
-            except json.JSONDecodeError:
+                # 如果已经是字典，直接使用；否则尝试解析 JSON
+                if isinstance(raw_value, dict):
+                    parsed = raw_value
+                else:
+                    parsed = json.loads(raw_value)
+            except (json.JSONDecodeError, TypeError):
                 # 纯文本日志，构造一个简单的日志字典
                 parsed = {
                     'message': raw_value,
