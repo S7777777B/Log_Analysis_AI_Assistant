@@ -387,31 +387,29 @@ start_docker_services() {
     if [ $? -eq 0 ]; then
         echo -e "${GREEN}✓ 容器启动成功${NC}"
         echo ""
-        echo -e "${BLUE}等待服务就绪...${NC}"
         
-        # 等待 Kafka 就绪
-        echo "等待 Kafka (端口 9092)..."
-        for i in {1..30}; do
-            if nc -z localhost 9092 2>/dev/null; then
-                echo -e "${GREEN}✓ Kafka 就绪${NC}"
-                break
-            fi
-            sleep 2
-            echo -n "."
-        done
-        echo ""
-        
-        # 等待 ClickHouse 就绪
-        echo "等待 ClickHouse (端口 8123)..."
-        for i in {1..30}; do
-            if nc -z localhost 8123 2>/dev/null; then
+        # 等待服务就绪
+        echo "等待服务启动..."
+        echo "等待 ClickHouse 就绪..."
+        for i in {1..20}; do
+            if $DOCKER_CMD exec clickhouse-server wget -q --spider http://localhost:8123/ping 2>/dev/null; then
                 echo -e "${GREEN}✓ ClickHouse 就绪${NC}"
                 break
             fi
-            sleep 2
             echo -n "."
+            sleep 3
         done
+        
         echo ""
+        echo "等待 Kafka 就绪..."
+        for i in {1..30}; do
+            if $DOCKER_CMD exec kafka-kraft kafka-broker-api-versions --bootstrap-server localhost:9092 2>/dev/null; then
+                echo -e "${GREEN}✓ Kafka 就绪${NC}"
+                break
+            fi
+            echo -n "."
+            sleep 3
+        done
         
         echo ""
         echo -e "${GREEN}🎉 所有服务启动完成！${NC}"
