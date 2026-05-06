@@ -244,8 +244,11 @@ echo "========== 其他 =========="
 echo "11. 运行所有测试"
 echo "12. 仅显示项目信息"
 echo "13. 退出"
+echo ""
+echo "========== 一键操作 =========="
+echo "14. 一键测试并启动可视化（启动服务+生成日志+运行测试+打开仪表板）"
 
-read -p "请输入选项 (1-13): " choice
+read -p "请输入选项 (1-14): " choice
 
 echo ""
 
@@ -609,6 +612,57 @@ case $choice in
     13)
         echo -e "${CYAN}退出脚本${NC}"
         exit 0
+        ;;
+    # ========== 一键操作 ==========
+    14)
+        echo -e "${GREEN}========== 一键测试并启动可视化 ==========${NC}"
+        echo ""
+        
+        # 步骤1: 启动 Kafka + ClickHouse 服务
+        echo -e "${YELLOW}步骤 1/5: 启动 Kafka + ClickHouse 服务...${NC}"
+        echo "----------------------------------------"
+        start_docker_services
+        if [ $? -ne 0 ]; then
+            echo -e "${RED}❌ 服务启动失败，退出${NC}"
+            exit 1
+        fi
+        echo ""
+        
+        # 步骤2: 生成测试日志
+        echo -e "${YELLOW}步骤 2/5: 生成测试日志...${NC}"
+        echo "----------------------------------------"
+        python tests/collectors/simulate_logs.py
+        if [ $? -ne 0 ]; then
+            echo -e "${RED}❌ 日志生成失败，退出${NC}"
+            exit 1
+        fi
+        echo ""
+        
+        # 步骤3: 运行采集器单元测试
+        echo -e "${YELLOW}步骤 3/5: 运行采集器单元测试...${NC}"
+        echo "----------------------------------------"
+        if ! command -v pytest &>/dev/null; then
+            echo -e "${YELLOW}⚠️  pytest 未安装，正在安装...${NC}"
+            pip install pytest -q
+        fi
+        pytest tests/collectors/test_collectors.py -v
+        echo ""
+        
+        # 步骤4: 运行存储模块测试
+        echo -e "${YELLOW}步骤 4/5: 运行存储模块测试...${NC}"
+        echo "----------------------------------------"
+        pytest tests/collectors/storage/storage_test.py -v
+        echo ""
+        
+        # 步骤5: 启动可视化仪表板
+        echo -e "${YELLOW}步骤 5/5: 启动可视化仪表板...${NC}"
+        echo "----------------------------------------"
+        echo -e "${GREEN}🎉 所有测试完成！${NC}"
+        echo ""
+        echo -e "${BLUE}访问地址:${NC} http://localhost:8501"
+        echo -e "${BLUE}按 Ctrl+C 停止${NC}"
+        echo ""
+        streamlit run src/visualization/dashboard.py --server.port 8501 --server.address localhost
         ;;
     *)
         echo -e "${RED}❌ 无效选项${NC}"

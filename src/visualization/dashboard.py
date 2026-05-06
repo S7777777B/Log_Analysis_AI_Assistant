@@ -815,7 +815,7 @@ def show_ueba_ranking():
     # 高危用户详情
     st.subheader("📋 高危用户详情")
     
-    selected_user = st.selectbox("选择用户查看详情", ranking_data["用户名"][:5])
+    selected_user = st.selectbox("选择用户查看详情", df_ranking["用户名"].tolist()[:5])
     
     if selected_user:
         col1, col2, col3, col4 = st.columns(4)
