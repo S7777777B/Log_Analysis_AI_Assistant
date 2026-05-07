@@ -564,8 +564,84 @@ case $choice in
     8)
         echo -e "${GREEN}运行完整集成测试...${NC}"
         echo "测试文件: tests/collectors/integration_test_collectors.py"
-        echo "注意: 需要提前启动 Kafka 和 Filebeat"
         echo ""
+        
+        # 检查并安装 Filebeat
+        echo -e "${YELLOW}[1/3] 检查 Filebeat 依赖...${NC}"
+        if ! command -v filebeat &>/dev/null; then
+            echo -e "${YELLOW}⚠️  Filebeat 未安装，正在安装...${NC}"
+            if command -v apt &>/dev/null; then
+                echo "更新软件源..."
+                sudo apt update -y > /dev/null 2>&1
+                
+                echo "下载 Filebeat..."
+                curl -L -O https://artifacts.elastic.co/downloads/beats/filebeat/filebeat-8.13.0-amd64.deb > /dev/null 2>&1
+                
+                echo "安装 Filebeat..."
+                sudo dpkg -i filebeat-8.13.0-amd64.deb > /dev/null 2>&1
+                
+                if [ $? -eq 0 ]; then
+                    echo -e "${GREEN}✓ Filebeat 安装成功${NC}"
+                else
+                    echo -e "${RED}❌ Filebeat 安装失败${NC}"
+                    exit 1
+                fi
+            else
+                echo -e "${RED}❌ 不支持的系统，请手动安装 Filebeat${NC}"
+                exit 1
+            fi
+        else
+            echo -e "${GREEN}✓ Filebeat 已安装${NC}"
+        fi
+        
+        # 配置 Filebeat
+        echo -e "${YELLOW}[2/3] 配置 Filebeat...${NC}"
+        sudo mkdir -p /etc/filebeat
+        cat > /etc/filebeat/filebeat.yml << 'EOF'
+filebeat.inputs:
+- type: log
+  enabled: true
+  paths:
+    - /var/log/*.log
+    - ~/programs/Log_Analysis_AI_Assistant/tests/collectors/sample_logs/*.log
+
+output.kafka:
+  hosts: ["localhost:9092"]
+  topic: logs_raw
+  partition.round_robin:
+    reachable_only: false
+  required_acks: 1
+  compression: gzip
+  max_message_bytes: 10485760
+
+logging.level: info
+logging.to_files: true
+logging.files:
+  path: /var/log/filebeat
+  name: filebeat
+  keepfiles: 7
+  permissions: 0644
+EOF
+        echo -e "${GREEN}✓ Filebeat 配置完成${NC}"
+        
+        # 启动 Filebeat
+        echo -e "${YELLOW}[3/3] 启动 Filebeat...${NC}"
+        sudo systemctl enable filebeat > /dev/null 2>&1
+        sudo systemctl restart filebeat
+        
+        if [ $? -eq 0 ]; then
+            echo -e "${GREEN}✓ Filebeat 启动成功${NC}"
+        else
+            echo -e "${YELLOW}⚠️  Filebeat 启动失败，尝试手动启动${NC}"
+            sudo filebeat -e -c /etc/filebeat/filebeat.yml &
+            sleep 5
+        fi
+        
+        echo ""
+        echo -e "${GREEN}✅ 环境依赖检查完成${NC}"
+        echo ""
+        
+        # 运行集成测试
         python tests/collectors/integration_test_collectors.py
         ;;
     9)
