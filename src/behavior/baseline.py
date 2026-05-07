@@ -12,6 +12,7 @@ from src.behavior.normalizer import (
     get_first_value,
     get_ip_address,
     get_location,
+    get_username,
     is_failed_status,
     is_login_event,
     parse_timestamp_value,
@@ -179,13 +180,13 @@ class BehaviorBaseline:
         }
 
     def _iter_user_logs(self, logs: List[Dict[str, Any]]) -> Iterable[Dict[str, Any]]:
-        """迭代当前用户日志，兼容未带用户名的输入。"""
+        """迭代当前用户日志。"""
         for log in logs:
             if not isinstance(log, dict):
                 continue
 
-            username = log.get("username")
-            if username is None or str(username) == self.username:
+            username = get_username(log)
+            if username == self.username:
                 yield log
 
     def _get_timestamp(self, log: Dict[str, Any]) -> Optional[datetime]:

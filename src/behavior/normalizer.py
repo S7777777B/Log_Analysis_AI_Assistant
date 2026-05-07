@@ -3,7 +3,9 @@
 from datetime import datetime
 from typing import Any, Dict, Optional
 
+from src.behavior.schemas import NormalizedBehaviorLog
 from src.utils.helpers import parse_timestamp
+from src.utils.helpers import format_datetime
 
 
 def parse_timestamp_value(value: Any) -> Optional[datetime]:
@@ -33,6 +35,16 @@ def get_first_value(
         if value not in (None, ""):
             return value
     return None
+
+
+def get_username(log: Dict[str, Any]) -> Optional[str]:
+    """读取标准化用户名字段。"""
+    username = get_first_value(log, ("username", "user", "account"))
+    if username is None:
+        return None
+
+    normalized = str(username).strip()
+    return normalized or None
 
 
 def get_ip_address(log: Dict[str, Any]) -> Optional[str]:
@@ -71,6 +83,20 @@ def get_action(log: Dict[str, Any]) -> Optional[str]:
     return normalized
 
 
+def get_status(log: Dict[str, Any]) -> Optional[str]:
+    """读取标准化状态字段。"""
+    status = get_first_value(log, ("status", "result"))
+    if status not in (None, ""):
+        return str(status).strip().upper()
+
+    event_type = str(log.get("event_type", "")).strip().upper()
+    if event_type.endswith("SUCCESS"):
+        return "SUCCESS"
+    if event_type.endswith("FAIL"):
+        return "FAIL"
+    return None
+
+
 def is_login_event(log: Dict[str, Any]) -> bool:
     """判断日志是否为登录事件。"""
     action = get_action(log)
@@ -102,3 +128,90 @@ def build_sort_key(log: Dict[str, Any]) -> tuple:
     timestamp = parse_timestamp_value(log.get("timestamp")) or datetime.max
     log_id = log.get("id")
     return (timestamp, int(log_id) if isinstance(log_id, int) else 0)
+
+
+def normalize_behavior_log(
+    log: Dict[str, Any],
+    fallback_username: Optional[str] = None,
+    require_timestamp: bool = False,
+) -> Optional[NormalizedBehaviorLog]:
+    """将原始日志标准化为 behavior 模块统一结构。
+
+    Args:
+        log: 原始结构化日志。
+        fallback_username: 日志未带用户名时可选的回退用户名。
+        require_timestamp: 是否要求时间戳必须可解析。
+
+    Returns:
+        标准化后的日志；若关键字段缺失或非法则返回 ``None``。
+    """
+    if not isinstance(log, dict):
+        return None
+
+    username = get_username(log)
+    if username is None and fallback_username not in (None, ""):
+        username = str(fallback_username).strip() or None
+    if not username:
+        return None
+
+    timestamp = parse_timestamp_value(log.get("timestamp"))
+    if timestamp is None:
+        if require_timestamp:
+            raise ValueError("Invalid timestamp for behavior log")
+        return None
+
+    normalized: NormalizedBehaviorLog = {
+        "timestamp": format_datetime(timestamp),
+        "username": username,
+    }
+
+    if isinstance(log.get("id"), int):
+        normalized["id"] = int(log["id"])
+
+    log_type = get_first_value(log, ("log_type",))
+    if log_type not in (None, ""):
+        normalized["log_type"] = str(log_type).strip()
+
+    action = get_action(log)
+    if action:
+        normalized["action"] = action
+
+    status = get_status(log)
+    if status:
+        normalized["status"] = status
+
+    ip_address = get_ip_address(log)
+    if ip_address:
+        normalized["source_ip"] = ip_address
+
+    location = get_location(log)
+    if location:
+        normalized["location"] = location
+
+    endpoint = get_endpoint(log)
+    if endpoint:
+        normalized["endpoint"] = endpoint
+
+    user_agent = get_first_value(log, ("user_agent", "client_software"))
+    if user_agent not in (None, ""):
+        normalized["user_agent"] = str(user_agent)
+
+    for field_name in (
+        "method",
+        "response_time",
+        "dept",
+        "role",
+        "protocol",
+        "auth_method",
+        "vpn_gateway",
+        "session_id",
+        "fail_reason",
+        "raw_log",
+        "parser",
+        "parse_status",
+    ):
+        value = log.get(field_name)
+        if value not in (None, ""):
+            normalized[field_name] = value
+
+    return normalized

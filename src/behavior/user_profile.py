@@ -8,11 +8,10 @@ from src.behavior.baseline import BehaviorBaseline
 from src.behavior.normalizer import (
     build_sort_key,
     get_action,
-    get_endpoint,
     get_first_value,
-    get_ip_address,
     get_location,
     is_login_event,
+    normalize_behavior_log,
     parse_timestamp_value,
     require_timestamp_value,
 )
@@ -111,65 +110,13 @@ class UserProfile:
 
     def add_log(self, log: Dict[str, Any]) -> None:
         """按结构化日志自动写入画像。"""
-        if not isinstance(log, dict):
+        normalized_log = normalize_behavior_log(
+            log,
+            require_timestamp=True,
+        )
+        if normalized_log is None or normalized_log.get("username") != self.username:
             return
-
-        log_username = log.get("username")
-        if log_username is not None and str(log_username) != self.username:
-            return
-
-        timestamp = self._require_timestamp(log.get("timestamp"))
-        normalized_log: Dict[str, Any] = {
-            "timestamp": timestamp,
-            "username": self.username,
-        }
-
-        for field_name in (
-            "id",
-            "log_type",
-            "location",
-            "dept",
-            "role",
-            "protocol",
-            "auth_method",
-            "vpn_gateway",
-            "session_id",
-            "fail_reason",
-            "raw_log",
-            "parser",
-            "parse_status",
-            "method",
-            "response_time",
-        ):
-            value = log.get(field_name)
-            if value not in (None, ""):
-                normalized_log[field_name] = value
-
-        ip_address = get_ip_address(log)
-        if ip_address:
-            normalized_log["source_ip"] = ip_address
-
-        endpoint = get_endpoint(log)
-        if endpoint:
-            normalized_log["endpoint"] = endpoint
-
-        location = get_location(log)
-        if location:
-            normalized_log["location"] = location
-
-        action = get_action(log)
-        if action:
-            normalized_log["action"] = action
-
-        status = get_first_value(log, ("status", "result"))
-        if status not in (None, ""):
-            normalized_log["status"] = str(status).strip().upper()
-
-        user_agent = get_first_value(log, ("user_agent", "client_software"))
-        if user_agent:
-            normalized_log["user_agent"] = str(user_agent)
-
-        self._append_log(normalized_log)
+        self._append_log(dict(normalized_log))
 
     def build_from_logs(self, logs: List[Dict[str, Any]]) -> "UserProfile":
         """从日志列表批量构建画像。"""

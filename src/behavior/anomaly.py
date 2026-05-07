@@ -10,6 +10,7 @@ from src.behavior.normalizer import (
     get_first_value,
     get_ip_address,
     get_location,
+    get_username,
     is_failed_status,
     is_login_event,
     parse_timestamp_value,
@@ -98,7 +99,9 @@ class AnomalyDetector:
 
         for index, start_log in enumerate(login_logs):
             start_timestamp = self._require_timestamp(start_log.get("timestamp"))
-            username = str(start_log.get("username", ""))
+            username = get_username(start_log)
+            if not username:
+                continue
             related_logs = [start_log]
             ip_set = {str(get_ip_address(start_log) or "")}
 
@@ -106,7 +109,7 @@ class AnomalyDetector:
                 next_timestamp = self._require_timestamp(next_log.get("timestamp"))
                 if next_timestamp - start_timestamp > timedelta(minutes=window_minutes):
                     break
-                if str(next_log.get("username", "")) != username:
+                if get_username(next_log) != username:
                     continue
                 related_logs.append(next_log)
                 ip_address = get_ip_address(next_log)
@@ -159,7 +162,8 @@ class AnomalyDetector:
             return None
 
         timestamp = self._get_timestamp(log)
-        if timestamp is None:
+        username = get_username(log)
+        if timestamp is None or not username:
             return None
 
         matched_rules: List[str] = []
@@ -194,7 +198,7 @@ class AnomalyDetector:
         meets_threshold = score >= self.threshold
         return {
             "anomaly_id": self._build_anomaly_id(log, matched_rules),
-            "username": str(log.get("username", "")),
+            "username": username,
             "timestamp": format_datetime(timestamp),
             "anomaly_type": matched_rules[0],
             "anomaly_score": score,
@@ -308,7 +312,7 @@ class AnomalyDetector:
     ) -> None:
         """为高频 API 调用补充聚合异常。"""
         api_logs = [
-            log for log in logs if str(log.get("action", "")).upper() == "API_CALL"
+            log for log in logs if self._get_action(log) == "API_CALL"
         ]
         api_count = len(api_logs)
         baseline_avg = float(baseline.get("api_call_avg_per_hour", 0.0))

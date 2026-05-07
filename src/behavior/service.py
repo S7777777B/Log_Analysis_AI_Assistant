@@ -4,7 +4,7 @@ from typing import Any, Dict, List, Optional
 
 from src.behavior.anomaly import AnomalyDetector
 from src.behavior.baseline import BehaviorBaseline
-from src.behavior.normalizer import build_sort_key
+from src.behavior.normalizer import build_sort_key, get_username
 from src.behavior.schemas import (
     AnomalyResult,
     BehaviorAnalysisResult,
@@ -48,7 +48,7 @@ class BehaviorAnalysisService:
     ) -> List[AnomalyResult]:
         """检测单个用户的异常行为。"""
         user_logs = self._filter_user_logs(username, logs)
-        active_baseline = baseline or self.build_baseline(username, logs)
+        active_baseline = baseline or self.build_baseline(username, user_logs)
         return self.detector.detect_batch(user_logs, active_baseline)
 
     def analyze_user(
@@ -58,12 +58,13 @@ class BehaviorAnalysisService:
         detection_logs: Optional[List[Dict[str, Any]]] = None,
     ) -> BehaviorAnalysisResult:
         """输出单个用户的完整行为分析结果。"""
-        baseline = self.build_baseline(username, logs)
-        profile = self.build_profile(username, logs)
+        user_logs = self._filter_user_logs(username, logs)
+        baseline = self.build_baseline(username, user_logs)
+        profile = self.build_profile(username, user_logs)
         active_detection_logs = (
             self._filter_user_logs(username, detection_logs)
             if detection_logs is not None
-            else self._filter_user_logs(username, logs)
+            else user_logs
         )
         anomalies = self.detector.detect_batch(active_detection_logs, baseline)
 
@@ -92,7 +93,7 @@ class BehaviorAnalysisService:
             [
                 log
                 for log in logs
-                if isinstance(log, dict) and str(log.get("username", "")) == username
+                if isinstance(log, dict) and get_username(log) == username
             ],
             key=build_sort_key,
         )
