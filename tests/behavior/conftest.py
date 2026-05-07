@@ -10,8 +10,8 @@ from src.behavior.baseline import BehaviorBaseline
 from src.utils.config import settings
 
 
-TARGET_USER = "alice"
-OTHER_USER = "bob"
+TARGET_USER = "zhangsan"
+OTHER_USER = "lisi"
 
 
 @pytest.fixture
