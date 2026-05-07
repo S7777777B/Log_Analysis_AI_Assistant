@@ -104,9 +104,13 @@ Log_Analysis_AI_Assistant/
 │   │   └── elasticsearch.py # Elasticsearch 客户端
 │   ├── behavior/            # 用户行为建模模块
 │   │   ├── __init__.py
-│   │   ├── user_profile.py  # 用户画像
+│   │   ├── normalizer.py    # 行为日志标准化
 │   │   ├── baseline.py      # 行为基线
-│   │   └── anomaly.py       # 异常检测
+│   │   ├── user_profile.py  # 用户画像
+│   │   ├── anomaly.py       # 异常检测
+│   │   ├── repository.py    # 行为数据协议
+│   │   ├── service.py       # 统一分析服务入口
+│   │   └── schemas.py       # 行为模块共享结构
 │   ├── ai/                  # AI 分析模块
 │   │   ├── __init__.py
 │   │   ├── analyzer.py      # AI 分析器
@@ -133,7 +137,8 @@ Log_Analysis_AI_Assistant/
 │   ├── behavior/
 │   │   ├── behavior_config_cli.py
 │   │   ├── run_behavior.sh
-│   │   └── test_behavior.py
+│   │   ├── test_behavior.py
+│   │   └── test_behavior_unit.py
 │   ├── test_collectors.py
 │   ├── test_parsers.py
 │   └── ...
@@ -240,12 +245,27 @@ git push origin feature/your-feature-name
 # 运行所有测试
 pytest tests/
 
+# 运行 behavior 模块测试
+pytest tests/behavior -v
+
 # 运行特定模块测试
 pytest tests/test_collectors.py
 
 # 生成测试覆盖率报告
 pytest --cov=src tests/
 ```
+
+### Behavior 模块说明
+
+- `src/behavior/normalizer.py`：负责统一字段读取和日志标准化。
+- `src/behavior/baseline.py`：负责用户行为基线统计。
+- `src/behavior/user_profile.py`：负责用户画像构建。
+- `src/behavior/anomaly.py`：负责规则型异常检测和评分。
+- `src/behavior/service.py`：负责输出统一行为分析结果。
+
+说明：
+- `tests/behavior/run_behavior.sh` 和 `tests/behavior/behavior_config_cli.py` 是本地辅助脚本，不是核心 pytest 入口。
+- `local_only` 下的 VPN 样本只用于可选演示测试，不是核心单元测试依赖。
 
 ### 5. 部署流程
 

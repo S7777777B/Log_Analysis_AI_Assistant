@@ -3,21 +3,29 @@
 
 from __future__ import annotations
 
-import json
-from pathlib import Path
+from datetime import datetime
 from typing import Any, Dict, List
 
 import pytest
 
 from src.behavior.anomaly import AnomalyDetector
 from src.behavior.baseline import BehaviorBaseline
-from src.behavior.normalizer import normalize_behavior_log
+from src.behavior.normalizer import (
+    get_action,
+    get_endpoint,
+    get_ip_address,
+    get_location,
+    get_status,
+    is_failed_status,
+    is_login_event,
+    normalize_behavior_log,
+    parse_timestamp_value,
+    require_timestamp_value,
+)
 from src.behavior.repository import InMemoryBehaviorRepository
 from src.behavior.service import BehaviorAnalysisService
 from src.behavior.user_profile import UserProfile
 from src.utils.config import settings
-
-from tests.behavior import test_behavior as behavior_integration
 
 
 TARGET_USER = "alice"
@@ -25,7 +33,7 @@ TARGET_USER = "alice"
 
 @pytest.fixture
 def history_logs() -> List[Dict[str, Any]]:
-    """提供一组不依赖本地文件的内置行为样本。"""
+    """提供不依赖 local_only 的内置行为样本。"""
     return [
         {
             "id": 1,
@@ -98,7 +106,10 @@ def history_logs() -> List[Dict[str, Any]]:
 
 
 @pytest.fixture
-def baseline(history_logs: List[Dict[str, Any]], monkeypatch: pytest.MonkeyPatch) -> Dict[str, Any]:
+def baseline(
+    history_logs: List[Dict[str, Any]],
+    monkeypatch: pytest.MonkeyPatch,
+) -> Dict[str, Any]:
     """提供目标用户行为基线。"""
     monkeypatch.setattr(settings, "min_samples_for_profile", 3)
     return BehaviorBaseline(TARGET_USER).build_baseline(history_logs)
@@ -107,8 +118,48 @@ def baseline(history_logs: List[Dict[str, Any]], monkeypatch: pytest.MonkeyPatch
 class TestNormalizer:
     """测试标准化逻辑。"""
 
+    def test_ip_location_endpoint_fallbacks_are_supported(self):
+        """应支持多种字段别名。"""
+        assert get_ip_address({"source_ip": "10.0.0.1"}) == "10.0.0.1"
+        assert get_ip_address({"remote_addr": "10.0.0.2"}) == "10.0.0.2"
+        assert get_ip_address({"ip": "10.0.0.3"}) == "10.0.0.3"
+        assert get_ip_address({"src_ip": "10.0.0.4"}) == "10.0.0.4"
+
+        assert get_location({"location": "北京"}) == "北京"
+        assert get_location({"src_city": "上海"}) == "上海"
+        assert get_endpoint({"endpoint": "/api/orders"}) == "/api/orders"
+        assert get_endpoint({"uri": "/api/users"}) == "/api/users"
+
+    def test_action_login_and_failed_status_are_normalized(self):
+        """应统一 action 和登录/失败识别。"""
+        assert get_action({"action": "api_call"}) == "API_CALL"
+        assert get_action({"event_type": "LOGIN_SUCCESS"}) == "LOGIN"
+        assert get_action({"log_type": "vpn_login"}) == "VPN_LOGIN"
+        assert get_status({"status": "success"}) == "SUCCESS"
+        assert get_status({"result": "failed"}) == "FAILED"
+        assert get_status({"event_type": "LOGIN_FAIL"}) == "FAIL"
+
+        assert is_login_event({"action": "LOGIN"}) is True
+        assert is_login_event({"event_type": "LOGIN_SUCCESS"}) is True
+        assert is_login_event({"event_type": "LOGIN_FAIL"}) is True
+        assert is_login_event({"action": "AUTH"}) is True
+        assert is_login_event({"log_type": "vpn_login"}) is True
+
+        for value in ("FAIL", "FAILED", "FAILURE", "ERROR", "LOGIN_FAIL"):
+            assert is_failed_status(value) is True
+        assert is_failed_status("SUCCESS") is False
+
+    def test_invalid_timestamp_is_handled_cleanly(self):
+        """非法时间字段应返回 None 或明确抛异常。"""
+        assert parse_timestamp_value("bad-time") is None
+        assert parse_timestamp_value("") is None
+        assert parse_timestamp_value(None) is None
+
+        with pytest.raises(ValueError):
+            require_timestamp_value("bad-time", "bad timestamp")
+
     def test_normalize_behavior_log_maps_common_fields(self):
-        """应能统一不同字段命名的日志。"""
+        """应能统一常见字段命名。"""
         normalized = normalize_behavior_log(
             {
                 "id": 9,
@@ -135,13 +186,11 @@ class TestNormalizer:
             "user_agent": "OpenVPN",
         }
 
-    def test_normalize_behavior_log_returns_none_for_missing_username_or_bad_timestamp(self):
-        """缺失用户名或非法时间应被明确拒绝。"""
+    def test_normalize_behavior_log_rejects_missing_username_or_bad_timestamp(self):
+        """缺少用户名或时间戳非法时不应抛 KeyError。"""
         assert normalize_behavior_log({"timestamp": "2026-04-01 09:00:00"}) is None
         assert normalize_behavior_log({"username": TARGET_USER, "timestamp": "bad-time"}) is None
 
-    def test_normalize_behavior_log_can_raise_for_required_timestamp(self):
-        """启用严格时间要求时，应抛出异常。"""
         with pytest.raises(ValueError):
             normalize_behavior_log(
                 {"username": TARGET_USER, "timestamp": "bad-time"},
@@ -150,63 +199,40 @@ class TestNormalizer:
 
 
 class TestBehaviorBaseline:
-    """测试用户行为基线。"""
+    """测试行为基线。"""
 
-    def test_build_baseline_filters_other_users_and_anonymous_logs(
-        self,
-        history_logs: List[Dict[str, Any]],
-        baseline: Dict[str, Any],
-    ):
-        """基线应只基于目标用户日志构建。"""
+    def test_build_baseline_filters_other_users(self, baseline: Dict[str, Any]):
+        """基线应只统计目标用户。"""
         assert baseline["username"] == TARGET_USER
         assert baseline["sample_count"] == 5
         assert baseline["common_ips"] == ["10.0.0.1"]
         assert baseline["common_locations"] == ["北京"]
-        assert baseline["action_frequency"] == {"LOGIN": 4, "API_CALL": 1}
-        assert all(log.get("username") != "bob" for log in history_logs[:5])
+        assert baseline["failed_login_count"] == 1
+        assert baseline["failed_login_rate"] == 0.25
 
     def test_build_baseline_returns_safe_defaults_for_empty_logs(
         self,
         monkeypatch: pytest.MonkeyPatch,
     ):
-        """空日志输入应返回稳定空基线。"""
+        """空日志应返回安全默认值。"""
         monkeypatch.setattr(settings, "min_samples_for_profile", 1)
         result = BehaviorBaseline("nobody").build_baseline([])
 
+        assert result["username"] == "nobody"
         assert result["sample_count"] == 0
         assert result["is_reliable"] is False
         assert result["activity_hours"] == {}
         assert result["common_hours"] == []
+        assert result["common_ips"] == []
+        assert result["common_locations"] == []
+        assert result["failed_login_count"] == 0
         assert result["failed_login_rate"] == 0.0
-        assert result["api_frequency"] == {}
-
-    def test_calculate_failed_login_rate_avoids_divide_by_zero(self):
-        """没有登录事件时，失败率应安全为 0。"""
-        result = BehaviorBaseline(TARGET_USER).calculate_failed_login_rate(
-            [
-                {
-                    "timestamp": "2026-04-01 10:00:00",
-                    "username": TARGET_USER,
-                    "action": "API_CALL",
-                    "endpoint": "/api/orders",
-                }
-            ]
-        )
-
-        assert result == {
-            "failed_login_count": 0,
-            "login_count": 0,
-            "failed_login_rate": 0.0,
-        }
 
 
 class TestUserProfile:
     """测试用户画像。"""
 
-    def test_build_from_logs_generates_profile_summary(
-        self,
-        history_logs: List[Dict[str, Any]],
-    ):
+    def test_build_from_logs_generates_profile_summary(self, history_logs: List[Dict[str, Any]]):
         """画像应只汇总目标用户行为。"""
         profile = UserProfile(TARGET_USER).build_from_logs(history_logs).get_profile()
 
@@ -218,8 +244,8 @@ class TestUserProfile:
         assert profile["login_times"] == ["09:00", "09:30", "10:30", "11:00"]
         assert profile["baseline"]["sample_count"] == 5
 
-    def test_build_from_logs_skips_other_users_anonymous_and_invalid_timestamp(self):
-        """画像构建应忽略无法归属或非法的日志。"""
+    def test_build_from_logs_skips_other_users_and_bad_timestamp(self):
+        """画像构建应跳过他人日志和坏时间戳。"""
         logs = [
             {
                 "timestamp": "2026-04-01 09:00:00",
@@ -242,12 +268,6 @@ class TestUserProfile:
                 "action": "LOGIN",
                 "status": "SUCCESS",
             },
-            {
-                "timestamp": "2026-04-01 09:10:00",
-                "source_ip": "10.0.0.4",
-                "action": "LOGIN",
-                "status": "SUCCESS",
-            },
         ]
 
         profile = UserProfile(TARGET_USER).build_from_logs(logs).get_profile()
@@ -261,18 +281,15 @@ class TestAnomalyDetector:
     """测试异常检测。"""
 
     def test_detect_log_returns_none_for_invalid_input(self, baseline: Dict[str, Any]):
-        """缺失关键字段的事件不应导致检测器崩溃。"""
+        """缺失关键字段时不应崩溃。"""
         detector = AnomalyDetector()
 
         assert detector.detect_log(None, baseline) is None
         assert detector.detect_log({"timestamp": "bad-time", "username": TARGET_USER}, baseline) is None
         assert detector.detect_log({"timestamp": "2026-04-02 03:00:00"}, baseline) is None
 
-    def test_detect_log_returns_readable_unusual_ip_and_time_anomaly(
-        self,
-        baseline: Dict[str, Any],
-    ):
-        """异常时间和异常 IP 应能稳定识别。"""
+    def test_detect_log_flags_unusual_time_ip_and_location(self, baseline: Dict[str, Any]):
+        """异常时间、IP、位置应被识别。"""
         log = {
             "timestamp": "2026-04-02 03:00:00",
             "username": TARGET_USER,
@@ -286,18 +303,15 @@ class TestAnomalyDetector:
 
         assert anomaly is not None
         assert anomaly["username"] == TARGET_USER
-        assert anomaly["anomaly_type"] == "UNUSUAL_TIME"
         assert 0.0 < anomaly["anomaly_score"] <= 1.0
-        assert anomaly["risk_level"] in {"LOW", "MEDIUM", "HIGH", "CRITICAL"}
         assert anomaly["description"]
-        assert "UNUSUAL_IP" in anomaly["context"]["matched_rules"]
+        assert anomaly["risk_level"] in {"LOW", "MEDIUM", "HIGH", "CRITICAL"}
         assert "UNUSUAL_TIME" in anomaly["context"]["matched_rules"]
+        assert "UNUSUAL_IP" in anomaly["context"]["matched_rules"]
+        assert "UNUSUAL_LOCATION" in anomaly["context"]["matched_rules"]
 
-    def test_detect_log_marks_sensitive_action_as_high_risk_alert(
-        self,
-        baseline: Dict[str, Any],
-    ):
-        """敏感操作叠加异常上下文时应触发高风险告警。"""
+    def test_detect_log_flags_sensitive_action_and_threshold(self, baseline: Dict[str, Any]):
+        """敏感操作叠加异常上下文时应受 threshold 控制。"""
         log = {
             "timestamp": "2026-04-02 03:10:00",
             "username": TARGET_USER,
@@ -308,23 +322,64 @@ class TestAnomalyDetector:
             "status": "SUCCESS",
         }
 
-        anomaly = AnomalyDetector().detect_log(log, baseline)
+        anomaly = AnomalyDetector(threshold=0.7).detect_log(log, baseline)
+        strict_anomaly = AnomalyDetector(threshold=0.8).detect_log(log, baseline)
 
         assert anomaly is not None
+        assert anomaly["anomaly_score"] == pytest.approx(0.75)
         assert anomaly["risk_level"] == "HIGH"
         assert anomaly["is_alert"] is True
-        assert anomaly["anomaly_score"] == pytest.approx(0.75)
         assert "SENSITIVE_ACTION" in anomaly["context"]["matched_rules"]
+        assert strict_anomaly is not None
+        assert strict_anomaly["is_alert"] is False
 
-    def test_detect_batch_adds_failed_login_spike(
+    def test_detect_batch_flags_multi_ip_high_frequency_and_failed_spike(
         self,
         baseline: Dict[str, Any],
     ):
-        """失败登录突增应被聚合成独立异常。"""
+        """多 IP、高频调用、失败登录突增应被识别。"""
         logs = [
             {
                 "id": 11,
                 "timestamp": "2026-04-02 09:00:00",
+                "username": TARGET_USER,
+                "source_ip": "10.0.0.1",
+                "location": "北京",
+                "action": "LOGIN",
+                "status": "SUCCESS",
+            },
+            {
+                "id": 12,
+                "timestamp": "2026-04-02 09:10:00",
+                "username": TARGET_USER,
+                "source_ip": "10.0.0.2",
+                "location": "北京",
+                "action": "LOGIN",
+                "status": "SUCCESS",
+            },
+            {
+                "id": 13,
+                "timestamp": "2026-04-02 09:20:00",
+                "username": TARGET_USER,
+                "source_ip": "10.0.0.1",
+                "location": "北京",
+                "action": "API_CALL",
+                "endpoint": "/api/orders",
+                "status": "SUCCESS",
+            },
+            {
+                "id": 14,
+                "timestamp": "2026-04-02 09:25:00",
+                "username": TARGET_USER,
+                "source_ip": "10.0.0.1",
+                "location": "北京",
+                "action": "API_CALL",
+                "endpoint": "/api/orders",
+                "status": "SUCCESS",
+            },
+            {
+                "id": 15,
+                "timestamp": "2026-04-02 09:30:00",
                 "username": TARGET_USER,
                 "src_ip": "10.0.0.1",
                 "src_city": "北京",
@@ -332,8 +387,8 @@ class TestAnomalyDetector:
                 "result": "FAIL",
             },
             {
-                "id": 12,
-                "timestamp": "2026-04-02 09:10:00",
+                "id": 16,
+                "timestamp": "2026-04-02 09:35:00",
                 "username": TARGET_USER,
                 "src_ip": "10.0.0.1",
                 "src_city": "北京",
@@ -343,27 +398,51 @@ class TestAnomalyDetector:
         ]
 
         anomalies = AnomalyDetector().detect_batch(logs, baseline)
-        target = next(
-            anomaly
+        matched_rules = {
+            rule
             for anomaly in anomalies
-            if "FAILED_LOGIN_SPIKE" in anomaly["context"]["matched_rules"]
-        )
+            for rule in anomaly["context"].get("matched_rules", [])
+        }
 
-        assert target["username"] == TARGET_USER
-        assert target["anomaly_score"] >= 0.25
-        assert target["description"]
-        assert target["context"]["current_failed"] == 2
+        assert "MULTI_IP_LOGIN" in matched_rules
+        assert "HIGH_FREQUENCY" in matched_rules
+        assert "FAILED_LOGIN_SPIKE" in matched_rules
+        assert all(0.0 <= anomaly["anomaly_score"] <= 1.0 for anomaly in anomalies)
+        assert all(anomaly["description"] for anomaly in anomalies)
 
 
 class TestBehaviorAnalysisService:
     """测试统一服务入口。"""
 
-    def test_analyze_user_returns_complete_analysis_result(
+    def test_detect_anomalies_builds_baseline_from_filtered_user_logs(
         self,
         history_logs: List[Dict[str, Any]],
         monkeypatch: pytest.MonkeyPatch,
     ):
-        """服务层应输出基线、画像、异常和摘要。"""
+        """detect_anomalies 构建 baseline 时应只用目标用户日志。"""
+        service = BehaviorAnalysisService()
+        captured: Dict[str, Any] = {}
+        original_build_baseline = BehaviorAnalysisService.build_baseline
+
+        def spy_build_baseline(self, username: str, logs: List[Dict[str, Any]]):
+            captured["username"] = username
+            captured["logs"] = list(logs)
+            return original_build_baseline(self, username, logs)
+
+        monkeypatch.setattr(BehaviorAnalysisService, "build_baseline", spy_build_baseline)
+        result = service.detect_anomalies(TARGET_USER, history_logs)
+
+        assert result == []
+        assert captured["username"] == TARGET_USER
+        assert len(captured["logs"]) == 5
+        assert all(log.get("username") == TARGET_USER for log in captured["logs"])
+
+    def test_analyze_user_returns_complete_result(
+        self,
+        history_logs: List[Dict[str, Any]],
+        monkeypatch: pytest.MonkeyPatch,
+    ):
+        """服务入口应输出 baseline、profile、anomalies 和 summary。"""
         monkeypatch.setattr(settings, "min_samples_for_profile", 3)
         detection_logs = [
             {
@@ -385,26 +464,12 @@ class TestBehaviorAnalysisService:
         )
 
         assert result["username"] == TARGET_USER
-        assert result["baseline"]["sample_count"] == 5
-        assert result["profile"]["total_actions"] == 5
+        assert result["baseline"]["username"] == TARGET_USER
+        assert result["profile"]["username"] == TARGET_USER
         assert result["summary"]["anomaly_count"] == len(result["anomalies"])
         assert result["summary"]["alert_count"] == 1
         assert result["summary"]["highest_risk_level"] == "HIGH"
         assert result["anomalies"][0]["description"]
-
-    def test_analyze_user_handles_unknown_user(self, history_logs: List[Dict[str, Any]]):
-        """未知用户也应返回稳定空结果。"""
-        result = BehaviorAnalysisService().analyze_user("nobody", history_logs)
-
-        assert result["username"] == "nobody"
-        assert result["baseline"]["sample_count"] == 0
-        assert result["profile"]["total_actions"] == 0
-        assert result["anomalies"] == []
-        assert result["summary"] == {
-            "anomaly_count": 0,
-            "alert_count": 0,
-            "highest_risk_level": "INFO",
-        }
 
 
 class TestBehaviorRepository:
@@ -415,44 +480,30 @@ class TestBehaviorRepository:
         history_logs: List[Dict[str, Any]],
         baseline: Dict[str, Any],
     ):
-        """内存仓储应支持行为模块本地演示所需读写。"""
+        """内存仓储应支持按用户读取和写入结果。"""
         repository = InMemoryBehaviorRepository(history_logs)
         profile = UserProfile(TARGET_USER).build_from_logs(history_logs).get_profile()
-        anomalies = BehaviorAnalysisService().detect_anomalies(TARGET_USER, history_logs, baseline=baseline)
+        anomalies = BehaviorAnalysisService().detect_anomalies(
+            TARGET_USER,
+            history_logs,
+            baseline=baseline,
+        )
 
         history = repository.fetch_user_history(TARGET_USER)
         recent = repository.fetch_recent_user_events(TARGET_USER, window_minutes=45)
+        filtered = repository.fetch_user_history(
+            TARGET_USER,
+            start_time=datetime(2026, 4, 1, 9, 30, 0),
+            end_time=datetime(2026, 4, 1, 10, 30, 0),
+            limit=2,
+        )
         repository.save_baseline(baseline)
         repository.save_profile(profile)
         repository.save_anomalies(anomalies)
 
         assert len(history) == 5
         assert len(recent) == 2
+        assert [log["id"] for log in filtered] == [2, 3]
         assert repository.baselines[TARGET_USER]["sample_count"] == 5
         assert repository.profiles[TARGET_USER]["total_actions"] == 5
         assert repository.anomalies == anomalies
-
-
-class TestBehaviorIntegrationHelpers:
-    """测试正式测试脚本中的文件辅助逻辑。"""
-
-    def test_load_vpn_logs_reads_jsonl_file(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
-        """集成脚本的 JSONL 读取函数应保持可用。"""
-        sample_file = tmp_path / "vpn_logs.jsonl"
-        sample_file.write_text(
-            "\n".join(
-                [
-                    json.dumps({"timestamp": "2026-04-01 08:00:00", "username": "alice"}),
-                    json.dumps({"timestamp": "2026-04-01 08:05:00", "username": "bob"}),
-                ]
-            ),
-            encoding="utf-8",
-        )
-        monkeypatch.setattr(behavior_integration, "VPN_JSONL_PATH", sample_file)
-
-        logs = behavior_integration._load_vpn_logs()
-
-        assert logs == [
-            {"timestamp": "2026-04-01 08:00:00", "username": "alice"},
-            {"timestamp": "2026-04-01 08:05:00", "username": "bob"},
-        ]

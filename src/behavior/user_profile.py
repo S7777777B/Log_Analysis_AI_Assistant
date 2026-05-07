@@ -19,6 +19,17 @@ from src.behavior.schemas import BehaviorBaselineResult, UserProfileResult
 from src.utils.config import settings
 from src.utils.helpers import format_datetime
 
+try:
+    from src.utils.logger import get_logger
+except Exception:  # pragma: no cover - 兼容最小测试环境
+    import logging
+
+    def get_logger(name: str):
+        return logging.getLogger(name)
+
+
+logger = get_logger(__name__)
+
 
 class UserProfile:
     """单个用户的行为画像。"""
@@ -114,7 +125,11 @@ class UserProfile:
             log,
             require_timestamp=True,
         )
-        if normalized_log is None or normalized_log.get("username") != self.username:
+        if normalized_log is None:
+            logger.debug("用户画像跳过无法标准化的日志")
+            return
+        if normalized_log.get("username") != self.username:
+            logger.debug("用户画像忽略非目标用户日志: {}", normalized_log.get("username"))
             return
         self._append_log(dict(normalized_log))
 
@@ -128,6 +143,7 @@ class UserProfile:
             try:
                 self.add_log(log)
             except ValueError:
+                logger.warning("用户画像跳过时间戳无效的日志")
                 continue
 
         self.calculate_baseline()

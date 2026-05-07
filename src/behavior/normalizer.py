@@ -7,6 +7,17 @@ from src.behavior.schemas import NormalizedBehaviorLog
 from src.utils.helpers import parse_timestamp
 from src.utils.helpers import format_datetime
 
+try:
+    from src.utils.logger import get_logger
+except Exception:  # pragma: no cover - 兼容最小测试环境
+    import logging
+
+    def get_logger(name: str):
+        return logging.getLogger(name)
+
+
+logger = get_logger(__name__)
+
 
 def parse_timestamp_value(value: Any) -> Optional[datetime]:
     """安全解析时间字段。"""
@@ -146,18 +157,22 @@ def normalize_behavior_log(
         标准化后的日志；若关键字段缺失或非法则返回 ``None``。
     """
     if not isinstance(log, dict):
+        logger.debug("跳过非字典日志，无法标准化")
         return None
 
     username = get_username(log)
     if username is None and fallback_username not in (None, ""):
         username = str(fallback_username).strip() or None
     if not username:
+        logger.debug("跳过缺少用户名的日志")
         return None
 
     timestamp = parse_timestamp_value(log.get("timestamp"))
     if timestamp is None:
         if require_timestamp:
+            logger.warning("日志时间戳无效，无法标准化")
             raise ValueError("Invalid timestamp for behavior log")
+        logger.debug("跳过时间戳无效的日志")
         return None
 
     normalized: NormalizedBehaviorLog = {

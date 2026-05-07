@@ -13,6 +13,17 @@ from src.behavior.schemas import (
 )
 from src.behavior.user_profile import UserProfile
 
+try:
+    from src.utils.logger import get_logger
+except Exception:  # pragma: no cover - 兼容最小测试环境
+    import logging
+
+    def get_logger(name: str):
+        return logging.getLogger(name)
+
+
+logger = get_logger(__name__)
+
 
 class BehaviorAnalysisService:
     """统一串联基线、画像和异常检测。"""
@@ -87,6 +98,7 @@ class BehaviorAnalysisService:
     ) -> List[Dict[str, Any]]:
         """筛选并稳定排序指定用户日志。"""
         if not logs:
+            logger.debug("行为分析服务收到空日志列表")
             return []
 
         return sorted(

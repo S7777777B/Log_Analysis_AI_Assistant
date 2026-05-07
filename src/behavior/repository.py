@@ -12,9 +12,23 @@ from src.behavior.schemas import (
     UserProfileResult,
 )
 
+try:
+    from src.utils.logger import get_logger
+except Exception:  # pragma: no cover - 兼容最小测试环境
+    import logging
+
+    def get_logger(name: str):
+        return logging.getLogger(name)
+
+
+logger = get_logger(__name__)
+
 
 class BehaviorLogRepository(Protocol):
-    """定义 behavior 对历史/实时日志的读取需求。"""
+    """定义 behavior 对历史/实时日志的读取需求。
+
+    真实实现应由 storage 模块或其适配层提供。
+    """
 
     def fetch_user_history(
         self,
@@ -35,7 +49,10 @@ class BehaviorLogRepository(Protocol):
 
 
 class BehaviorResultRepository(Protocol):
-    """定义 behavior 对分析结果的写入需求。"""
+    """定义 behavior 对分析结果的写入需求。
+
+    真实实现应由 storage 模块或其适配层提供。
+    """
 
     def save_baseline(self, result: BehaviorBaselineResult) -> None:
         """保存行为基线。"""
@@ -65,6 +82,8 @@ class InMemoryBehaviorRepository:
             normalized = normalize_behavior_log(log)
             if normalized is not None:
                 self._logs.append(normalized)
+            else:
+                logger.debug("内存仓储跳过无法标准化的日志")
 
     def fetch_user_history(
         self,

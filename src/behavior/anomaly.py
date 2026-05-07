@@ -20,6 +20,17 @@ from src.behavior.schemas import AnomalyResult
 from src.utils.config import settings
 from src.utils.helpers import format_datetime, generate_id, get_risk_level
 
+try:
+    from src.utils.logger import get_logger
+except Exception:  # pragma: no cover - 兼容最小测试环境
+    import logging
+
+    def get_logger(name: str):
+        return logging.getLogger(name)
+
+
+logger = get_logger(__name__)
+
 
 class AnomalyDetector:
     """基于规则和统计的异常检测器。"""
@@ -101,6 +112,7 @@ class AnomalyDetector:
             start_timestamp = self._require_timestamp(start_log.get("timestamp"))
             username = get_username(start_log)
             if not username:
+                logger.debug("多 IP 登录检测跳过缺少用户名的日志")
                 continue
             related_logs = [start_log]
             ip_set = {str(get_ip_address(start_log) or "")}
@@ -159,11 +171,13 @@ class AnomalyDetector:
     def detect_log(self, log: Dict[str, Any], baseline: Dict[str, Any]) -> Optional[AnomalyResult]:
         """检测单条日志是否存在异常。"""
         if not isinstance(log, dict):
+            logger.debug("异常检测跳过非字典日志")
             return None
 
         timestamp = self._get_timestamp(log)
         username = get_username(log)
         if timestamp is None or not username:
+            logger.debug("异常检测跳过缺少用户名或时间戳无效的日志")
             return None
 
         matched_rules: List[str] = []
