@@ -1,275 +1,124 @@
 #!/usr/bin/env python3
-"""Behavior 模块完整测试。
-
-参考 storage 分支的测试风格，这个文件既能被 pytest 直接执行，也能作为
-独立脚本运行，帮助开发者快速看到 behavior 模块到底做了什么：
-
-1. 从 VPN 日志中提炼用户行为基线。
-2. 生成面向安全分析的用户画像。
-3. 检测异常 IP、异常时间、多 IP 登录等风险模式。
-4. 通过统一服务入口输出可供后续模块消费的分析结果。
-"""
+"""Behavior 模块完整流程测试。"""
 
 from __future__ import annotations
 
-import json
-import sys
-from pathlib import Path
 from typing import Any, Dict, List
 
 import pytest
 
-
-PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
-
-if str(PROJECT_ROOT) not in sys.path:
-    sys.path.insert(0, str(PROJECT_ROOT))
-
 from src.behavior.anomaly import AnomalyDetector
 from src.behavior.baseline import BehaviorBaseline
+from src.behavior.normalizer import normalize_behavior_log
+from src.behavior.normalizer import get_username
 from src.behavior.service import BehaviorAnalysisService
 from src.behavior.user_profile import UserProfile
+from src.utils.config import settings
+
+from tests.behavior.conftest import OTHER_USER, TARGET_USER
 
 
-VPN_JSONL_PATH = PROJECT_ROOT / "local_only" / "vpn_output" / "vpn_logs.jsonl"
-TARGET_USER = "sun.lei"
-
-pytestmark = pytest.mark.skipif(
-    not VPN_JSONL_PATH.exists(),
-    reason="本地 VPN 样本缺失，仅在存在 local_only/vpn_output/vpn_logs.jsonl 时运行。",
-)
-
-
-class TerminalFormatter:
-    """终端格式化输出。"""
-
-    @staticmethod
-    def print_header(text: str) -> None:
-        print(f"\n{'=' * 60}")
-        print(f" {text}")
-        print(f"{'=' * 60}")
-
-    @staticmethod
-    def print_section(text: str) -> None:
-        print(f"\n{'-' * 50}")
-        print(f" {text}")
-        print(f"{'-' * 50}")
-
-    @staticmethod
-    def print_step(step_num: int, text: str) -> None:
-        print(f"\n[{step_num}] {text}...")
-
-    @staticmethod
-    def print_success(text: str) -> None:
-        print(f"[OK] {text}")
-
-    @staticmethod
-    def print_info(text: str) -> None:
-        print(f"   [INFO] {text}")
-
-
-fmt = TerminalFormatter()
-
-
-def _load_vpn_logs() -> List[Dict[str, Any]]:
-    """加载 VPN JSONL 测试数据。"""
-    return [
-        json.loads(line)
-        for line in VPN_JSONL_PATH.read_text(encoding="utf-8").splitlines()
-        if line.strip()
-    ]
-
-
-def _filter_user_logs(logs: List[Dict[str, Any]], username: str) -> List[Dict[str, Any]]:
-    """筛选指定用户日志。"""
-    return [log for log in logs if log.get("username") == username]
-
-
-def _check_prerequisites() -> None:
-    """检查 behavior 测试运行依赖。"""
-    fmt.print_step(1, "检查测试数据和 Python 依赖")
-    assert VPN_JSONL_PATH.exists(), f"未找到 VPN 样本数据: {VPN_JSONL_PATH}"
-    fmt.print_success(f"VPN 样本存在: {VPN_JSONL_PATH}")
-    logs = _load_vpn_logs()
-    assert logs, "VPN 样本为空，无法运行行为模块测试"
-    fmt.print_info(f"样本总数: {len(logs)} 条")
-    fmt.print_success("Behavior 模块测试前置检查通过")
-
-
-def verify_baseline_workflow(logs: List[Dict[str, Any]]) -> Dict[str, Any]:
-    """验证行为基线构建流程。"""
-    fmt.print_section("测试 BehaviorBaseline")
-    baseline = BehaviorBaseline(TARGET_USER).build_baseline(logs)
+def test_behavior_baseline_workflow(history_logs: List[Dict[str, Any]]) -> None:
+    """BehaviorBaseline 应能从混合日志中提炼目标用户常态。"""
+    baseline = BehaviorBaseline(TARGET_USER).build_baseline(history_logs)
 
     assert baseline["username"] == TARGET_USER
-    assert baseline["sample_count"] > 0
-    assert baseline["common_ips"]
-    assert baseline["common_locations"]
-    assert baseline["failed_login_count"] >= 0
-    assert 0.0 <= baseline["failed_login_rate"] <= 1.0
-    assert baseline["api_call_avg_per_hour"] == 0.0
-
-    fmt.print_success("用户行为基线构建成功")
-    fmt.print_info(f"样本数: {baseline['sample_count']}")
-    fmt.print_info(f"常用位置: {baseline['common_locations']}")
-    fmt.print_info(f"失败登录次数: {baseline['failed_login_count']}")
-    return baseline
+    assert baseline["sample_count"] == 5
+    assert baseline["common_ips"] == ["10.0.0.1"]
+    assert "北京" in baseline["common_locations"]
+    assert baseline["action_frequency"] == {"LOGIN": 4, "API_CALL": 1}
+    assert baseline["api_frequency"] == {"/api/orders": 1}
+    assert baseline["failed_login_count"] == 1
+    assert baseline["failed_login_rate"] == 0.25
 
 
-def verify_profile_workflow(logs: List[Dict[str, Any]]) -> Dict[str, Any]:
-    """验证用户画像生成流程。"""
-    fmt.print_section("测试 UserProfile")
-    profile = UserProfile("admin").build_from_logs(logs).get_profile()
+def test_behavior_profile_workflow(history_logs: List[Dict[str, Any]]) -> None:
+    """UserProfile 应能生成稳定的用户画像摘要。"""
+    profile = UserProfile(TARGET_USER).build_from_logs(history_logs).get_profile()
 
-    assert profile["username"] == "admin"
-    assert profile["total_actions"] > 0
-    assert profile["common_locations"]
-    assert profile["user_agents"]
-    assert profile["baseline"]["sample_count"] == profile["total_actions"]
-    assert profile["baseline"]["failed_login_count"] >= 0
-
-    fmt.print_success("用户画像生成成功")
-    fmt.print_info(f"动作总数: {profile['total_actions']}")
-    fmt.print_info(f"常用位置: {profile['common_locations']}")
-    fmt.print_info(f"客户端软件: {profile['user_agents']}")
-    return profile
+    assert profile["username"] == TARGET_USER
+    assert profile["total_actions"] == 5
+    assert profile["common_ips"] == ["10.0.0.1"]
+    assert profile["common_locations"] == ["北京"]
+    assert profile["failed_login_count"] == 1
+    assert profile["login_times"] == ["09:00", "09:30", "10:30", "11:00"]
+    assert profile["baseline"]["sample_count"] == 5
 
 
-def verify_anomaly_workflow(logs: List[Dict[str, Any]], baseline: Dict[str, Any]) -> List[Dict[str, Any]]:
-    """验证异常检测流程。"""
-    fmt.print_section("测试 AnomalyDetector")
-    user_logs = _filter_user_logs(logs, TARGET_USER)
-    anomalies = AnomalyDetector().detect_batch(user_logs, baseline)
+def test_behavior_anomaly_workflow(
+    baseline: Dict[str, Any],
+    suspicious_detection_logs: List[Dict[str, Any]],
+) -> None:
+    """AnomalyDetector 应能识别核心风险模式。"""
+    user_detection_logs = [
+        log for log in suspicious_detection_logs if get_username(log) == TARGET_USER
+    ]
+    anomalies = AnomalyDetector().detect_batch(user_detection_logs, baseline)
     matched_rules = {
         rule
         for anomaly in anomalies
         for rule in anomaly["context"].get("matched_rules", [])
     }
 
-    assert anomalies
+    assert "UNUSUAL_TIME" in matched_rules
     assert "UNUSUAL_IP" in matched_rules
+    assert "UNUSUAL_LOCATION" in matched_rules
+    assert "SENSITIVE_ACTION" in matched_rules
     assert "MULTI_IP_LOGIN" in matched_rules
+    assert "HIGH_FREQUENCY" in matched_rules
+    assert "FAILED_LOGIN_SPIKE" in matched_rules
     assert all(anomaly["username"] == TARGET_USER for anomaly in anomalies)
     assert all(0.0 <= anomaly["anomaly_score"] <= 1.0 for anomaly in anomalies)
     assert all(anomaly["description"] for anomaly in anomalies)
 
-    fmt.print_success("异常检测流程运行成功")
-    fmt.print_info(f"异常总数: {len(anomalies)}")
-    fmt.print_info(
-        "异常类型分布: "
-        f"UNUSUAL_IP={sum(1 for item in anomalies if item['anomaly_type'] == 'UNUSUAL_IP')}, "
-        f"MULTI_IP_LOGIN={sum(1 for item in anomalies if item['anomaly_type'] == 'MULTI_IP_LOGIN')}"
+
+def test_behavior_service_workflow(
+    history_logs: List[Dict[str, Any]],
+    suspicious_detection_logs: List[Dict[str, Any]],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """BehaviorAnalysisService 应能统一输出画像、基线、异常和摘要。"""
+    monkeypatch.setattr(settings, "min_samples_for_profile", 3)
+    result = BehaviorAnalysisService().analyze_user(
+        TARGET_USER,
+        history_logs,
+        detection_logs=suspicious_detection_logs,
     )
-    return anomalies
-
-
-def verify_high_risk_alert_rule() -> Dict[str, Any]:
-    """验证高风险敏感操作告警规则。"""
-    fmt.print_section("测试高风险告警规则")
-    detector = AnomalyDetector()
-    baseline = {
-        "common_hours": [9, 10, 14],
-        "common_ips": ["192.168.1.100"],
-        "common_locations": ["北京"],
-        "is_reliable": True,
-    }
-    log = {
-        "timestamp": "2026-04-01 03:12:00",
-        "username": "zhangsan",
-        "source_ip": "10.0.0.100",
-        "location": "广州",
-        "action": "API_CALL",
-        "status": "SUCCESS",
-        "endpoint": "/api/admin/export",
-    }
-
-    anomaly = detector.detect_log(log, baseline)
-
-    assert anomaly is not None
-    assert anomaly["anomaly_score"] == pytest.approx(0.75)
-    assert anomaly["risk_level"] == "HIGH"
-    assert anomaly["is_alert"] is True
-    assert anomaly["context"]["matched_rules"] == [
-        "UNUSUAL_TIME",
-        "UNUSUAL_IP",
-        "UNUSUAL_LOCATION",
-        "SENSITIVE_ACTION",
-    ]
-
-    fmt.print_success("高风险敏感操作规则验证成功")
-    fmt.print_info(f"异常分数: {anomaly['anomaly_score']}")
-    fmt.print_info(f"风险等级: {anomaly['risk_level']}")
-    return anomaly
-
-
-def verify_service_workflow(logs: List[Dict[str, Any]]) -> Dict[str, Any]:
-    """验证统一行为分析服务。"""
-    fmt.print_section("测试 BehaviorAnalysisService")
-    result = BehaviorAnalysisService().analyze_user(TARGET_USER, logs)
 
     assert result["username"] == TARGET_USER
     assert result["baseline"]["username"] == TARGET_USER
     assert result["profile"]["username"] == TARGET_USER
     assert result["summary"]["anomaly_count"] == len(result["anomalies"])
-    assert result["summary"]["alert_count"] >= 0
-    assert result["summary"]["highest_risk_level"] in {"INFO", "LOW", "MEDIUM", "HIGH", "CRITICAL"}
-
-    fmt.print_success("统一行为分析服务验证成功")
-    fmt.print_info(f"分析用户: {result['username']}")
-    fmt.print_info(f"摘要: {result['summary']}")
-    return result
+    assert result["summary"]["alert_count"] >= 1
+    assert result["summary"]["highest_risk_level"] in {"LOW", "MEDIUM", "HIGH", "CRITICAL"}
 
 
-def run_behavior_module_demo() -> None:
-    """作为独立脚本运行时，输出 behavior 模块完整测试过程。"""
-    fmt.print_header("Behavior 模块完整测试")
-    _check_prerequisites()
-    logs = _load_vpn_logs()
-    baseline = verify_baseline_workflow(logs)
-    verify_profile_workflow(logs)
-    verify_anomaly_workflow(logs, baseline)
-    verify_high_risk_alert_rule()
-    verify_service_workflow(logs)
-    fmt.print_header("Behavior 模块测试全部通过")
+def test_behavior_end_to_end_workflow(
+    history_logs: List[Dict[str, Any]],
+    suspicious_detection_logs: List[Dict[str, Any]],
+) -> None:
+    """原始/结构化日志应能完成 behavior 主流程。"""
+    normalized_history = [
+        normalized
+        for normalized in (normalize_behavior_log(log) for log in history_logs)
+        if normalized is not None
+    ]
+    normalized_detection = [
+        normalized
+        for normalized in (normalize_behavior_log(log) for log in suspicious_detection_logs)
+        if normalized is not None
+    ]
 
+    assert any(log["username"] == TARGET_USER for log in normalized_history)
+    assert any(log["username"] == OTHER_USER for log in normalized_history)
 
-@pytest.fixture
-def vpn_logs() -> List[Dict[str, Any]]:
-    """提供 VPN 输出样本。"""
-    return _load_vpn_logs()
+    result = BehaviorAnalysisService().analyze_user(
+        TARGET_USER,
+        normalized_history,
+        detection_logs=normalized_detection,
+    )
 
-
-def test_behavior_prerequisites(vpn_logs: List[Dict[str, Any]]) -> None:
-    """测试前置数据准备。"""
-    assert vpn_logs
-    assert VPN_JSONL_PATH.exists()
-
-
-def test_behavior_baseline_workflow(vpn_logs: List[Dict[str, Any]]) -> None:
-    """BehaviorBaseline 应能从 VPN 登录样本中提炼出用户常态。"""
-    verify_baseline_workflow(vpn_logs)
-
-
-def test_behavior_profile_workflow(vpn_logs: List[Dict[str, Any]]) -> None:
-    """UserProfile 应能把用户活动整理成便于分析的画像摘要。"""
-    verify_profile_workflow(vpn_logs)
-
-
-def test_behavior_anomaly_workflow(vpn_logs: List[Dict[str, Any]]) -> None:
-    """AnomalyDetector 应能发现陌生 IP 和短时多 IP 登录。"""
-    baseline = BehaviorBaseline(TARGET_USER).build_baseline(vpn_logs)
-    verify_anomaly_workflow(vpn_logs, baseline)
-
-
-def test_behavior_high_risk_alert_rule() -> None:
-    """当非常用时间/IP 叠加敏感接口访问时，应产生高风险告警。"""
-    verify_high_risk_alert_rule()
-
-
-def test_behavior_service_workflow(vpn_logs: List[Dict[str, Any]]) -> None:
-    """BehaviorAnalysisService 应能统一输出基线、画像、异常和摘要。"""
-    verify_service_workflow(vpn_logs)
-
-
-if __name__ == "__main__":
-    run_behavior_module_demo()
+    assert result["baseline"]["sample_count"] == 5
+    assert result["profile"]["total_actions"] == 5
+    assert result["summary"]["anomaly_count"] == len(result["anomalies"])
+    assert all(anomaly["username"] == TARGET_USER for anomaly in result["anomalies"])

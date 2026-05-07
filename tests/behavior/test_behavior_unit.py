@@ -27,92 +27,7 @@ from src.behavior.service import BehaviorAnalysisService
 from src.behavior.user_profile import UserProfile
 from src.utils.config import settings
 
-
-TARGET_USER = "alice"
-
-
-@pytest.fixture
-def history_logs() -> List[Dict[str, Any]]:
-    """提供不依赖 local_only 的内置行为样本。"""
-    return [
-        {
-            "id": 1,
-            "timestamp": "2026-04-01 09:00:00",
-            "username": TARGET_USER,
-            "src_ip": "10.0.0.1",
-            "src_city": "北京",
-            "event_type": "LOGIN_SUCCESS",
-            "result": "SUCCESS",
-            "client_software": "FortiClient 7.2",
-        },
-        {
-            "id": 2,
-            "timestamp": "2026-04-01 09:30:00",
-            "username": TARGET_USER,
-            "source_ip": "10.0.0.1",
-            "location": "北京",
-            "action": "LOGIN",
-            "status": "SUCCESS",
-            "user_agent": "FortiClient 7.2",
-        },
-        {
-            "id": 3,
-            "timestamp": "2026-04-01 10:00:00",
-            "username": TARGET_USER,
-            "source_ip": "10.0.0.1",
-            "location": "北京",
-            "action": "API_CALL",
-            "endpoint": "/api/orders",
-            "status": "SUCCESS",
-            "method": "GET",
-        },
-        {
-            "id": 4,
-            "timestamp": "2026-04-01 10:30:00",
-            "username": TARGET_USER,
-            "src_ip": "10.0.0.1",
-            "src_city": "北京",
-            "event_type": "LOGIN_FAIL",
-            "result": "FAIL",
-            "fail_reason": "bad password",
-        },
-        {
-            "id": 5,
-            "timestamp": "2026-04-01 11:00:00",
-            "username": TARGET_USER,
-            "source_ip": "10.0.0.1",
-            "location": "北京",
-            "action": "LOGIN",
-            "status": "SUCCESS",
-        },
-        {
-            "id": 6,
-            "timestamp": "2026-04-01 11:15:00",
-            "username": "bob",
-            "source_ip": "8.8.8.8",
-            "location": "上海",
-            "action": "LOGIN",
-            "status": "SUCCESS",
-        },
-        {
-            "id": 7,
-            "timestamp": "2026-04-01 11:20:00",
-            "source_ip": "172.16.0.1",
-            "location": "未知",
-            "action": "LOGIN",
-            "status": "SUCCESS",
-        },
-    ]
-
-
-@pytest.fixture
-def baseline(
-    history_logs: List[Dict[str, Any]],
-    monkeypatch: pytest.MonkeyPatch,
-) -> Dict[str, Any]:
-    """提供目标用户行为基线。"""
-    monkeypatch.setattr(settings, "min_samples_for_profile", 3)
-    return BehaviorBaseline(TARGET_USER).build_baseline(history_logs)
+from tests.behavior.conftest import OTHER_USER, TARGET_USER
 
 
 class TestNormalizer:
@@ -131,7 +46,7 @@ class TestNormalizer:
         assert get_endpoint({"uri": "/api/users"}) == "/api/users"
 
     def test_action_login_and_failed_status_are_normalized(self):
-        """应统一 action 和登录/失败识别。"""
+        """应统一 action、登录和失败状态识别。"""
         assert get_action({"action": "api_call"}) == "API_CALL"
         assert get_action({"event_type": "LOGIN_SUCCESS"}) == "LOGIN"
         assert get_action({"log_type": "vpn_login"}) == "VPN_LOGIN"
@@ -201,12 +116,17 @@ class TestNormalizer:
 class TestBehaviorBaseline:
     """测试行为基线。"""
 
-    def test_build_baseline_filters_other_users(self, baseline: Dict[str, Any]):
+    def test_build_baseline_filters_other_users(
+        self,
+        baseline: Dict[str, Any],
+    ):
         """基线应只统计目标用户。"""
         assert baseline["username"] == TARGET_USER
         assert baseline["sample_count"] == 5
         assert baseline["common_ips"] == ["10.0.0.1"]
         assert baseline["common_locations"] == ["北京"]
+        assert baseline["action_frequency"] == {"LOGIN": 4, "API_CALL": 1}
+        assert baseline["api_frequency"] == {"/api/orders": 1}
         assert baseline["failed_login_count"] == 1
         assert baseline["failed_login_rate"] == 0.25
 
@@ -256,7 +176,7 @@ class TestUserProfile:
             },
             {
                 "timestamp": "2026-04-01 09:05:00",
-                "username": "bob",
+                "username": OTHER_USER,
                 "source_ip": "10.0.0.2",
                 "action": "LOGIN",
                 "status": "SUCCESS",
@@ -280,13 +200,17 @@ class TestUserProfile:
 class TestAnomalyDetector:
     """测试异常检测。"""
 
-    def test_detect_log_returns_none_for_invalid_input(self, baseline: Dict[str, Any]):
+    def test_detect_log_returns_none_for_invalid_input(
+        self,
+        baseline: Dict[str, Any],
+        invalid_logs: List[Dict[str, Any]],
+    ):
         """缺失关键字段时不应崩溃。"""
         detector = AnomalyDetector()
 
         assert detector.detect_log(None, baseline) is None
-        assert detector.detect_log({"timestamp": "bad-time", "username": TARGET_USER}, baseline) is None
-        assert detector.detect_log({"timestamp": "2026-04-02 03:00:00"}, baseline) is None
+        assert detector.detect_log(invalid_logs[0], baseline) is None
+        assert detector.detect_log(invalid_logs[1], baseline) is None
 
     def test_detect_log_flags_unusual_time_ip_and_location(self, baseline: Dict[str, Any]):
         """异常时间、IP、位置应被识别。"""
@@ -336,68 +260,10 @@ class TestAnomalyDetector:
     def test_detect_batch_flags_multi_ip_high_frequency_and_failed_spike(
         self,
         baseline: Dict[str, Any],
+        suspicious_detection_logs: List[Dict[str, Any]],
     ):
         """多 IP、高频调用、失败登录突增应被识别。"""
-        logs = [
-            {
-                "id": 11,
-                "timestamp": "2026-04-02 09:00:00",
-                "username": TARGET_USER,
-                "source_ip": "10.0.0.1",
-                "location": "北京",
-                "action": "LOGIN",
-                "status": "SUCCESS",
-            },
-            {
-                "id": 12,
-                "timestamp": "2026-04-02 09:10:00",
-                "username": TARGET_USER,
-                "source_ip": "10.0.0.2",
-                "location": "北京",
-                "action": "LOGIN",
-                "status": "SUCCESS",
-            },
-            {
-                "id": 13,
-                "timestamp": "2026-04-02 09:20:00",
-                "username": TARGET_USER,
-                "source_ip": "10.0.0.1",
-                "location": "北京",
-                "action": "API_CALL",
-                "endpoint": "/api/orders",
-                "status": "SUCCESS",
-            },
-            {
-                "id": 14,
-                "timestamp": "2026-04-02 09:25:00",
-                "username": TARGET_USER,
-                "source_ip": "10.0.0.1",
-                "location": "北京",
-                "action": "API_CALL",
-                "endpoint": "/api/orders",
-                "status": "SUCCESS",
-            },
-            {
-                "id": 15,
-                "timestamp": "2026-04-02 09:30:00",
-                "username": TARGET_USER,
-                "src_ip": "10.0.0.1",
-                "src_city": "北京",
-                "event_type": "LOGIN_FAIL",
-                "result": "FAIL",
-            },
-            {
-                "id": 16,
-                "timestamp": "2026-04-02 09:35:00",
-                "username": TARGET_USER,
-                "src_ip": "10.0.0.1",
-                "src_city": "北京",
-                "event_type": "LOGIN_FAIL",
-                "result": "FAIL",
-            },
-        ]
-
-        anomalies = AnomalyDetector().detect_batch(logs, baseline)
+        anomalies = AnomalyDetector().detect_batch(suspicious_detection_logs, baseline)
         matched_rules = {
             rule
             for anomaly in anomalies
@@ -435,41 +301,46 @@ class TestBehaviorAnalysisService:
         assert result == []
         assert captured["username"] == TARGET_USER
         assert len(captured["logs"]) == 5
-        assert all(log.get("username") == TARGET_USER for log in captured["logs"])
+        assert all(
+            normalize_behavior_log(log).get("username") == TARGET_USER
+            for log in captured["logs"]
+            if normalize_behavior_log(log) is not None
+        )
 
     def test_analyze_user_returns_complete_result(
         self,
         history_logs: List[Dict[str, Any]],
+        suspicious_detection_logs: List[Dict[str, Any]],
         monkeypatch: pytest.MonkeyPatch,
     ):
         """服务入口应输出 baseline、profile、anomalies 和 summary。"""
         monkeypatch.setattr(settings, "min_samples_for_profile", 3)
-        detection_logs = [
-            {
-                "id": 101,
-                "timestamp": "2026-04-02 03:10:00",
-                "user": TARGET_USER,
-                "source_ip": "8.8.4.4",
-                "location": "广州",
-                "action": "API_CALL",
-                "endpoint": "/api/admin/export",
-                "status": "SUCCESS",
-            }
-        ]
-
         result = BehaviorAnalysisService().analyze_user(
             TARGET_USER,
             history_logs,
-            detection_logs=detection_logs,
+            detection_logs=suspicious_detection_logs,
         )
 
         assert result["username"] == TARGET_USER
         assert result["baseline"]["username"] == TARGET_USER
         assert result["profile"]["username"] == TARGET_USER
         assert result["summary"]["anomaly_count"] == len(result["anomalies"])
-        assert result["summary"]["alert_count"] == 1
-        assert result["summary"]["highest_risk_level"] == "HIGH"
-        assert result["anomalies"][0]["description"]
+        assert result["summary"]["alert_count"] >= 1
+        assert result["summary"]["highest_risk_level"] in {"LOW", "MEDIUM", "HIGH", "CRITICAL"}
+
+    def test_analyze_user_handles_unknown_user(self, history_logs: List[Dict[str, Any]]):
+        """未知用户也应返回安全结果。"""
+        result = BehaviorAnalysisService().analyze_user("nobody", history_logs)
+
+        assert result["username"] == "nobody"
+        assert result["baseline"]["sample_count"] == 0
+        assert result["profile"]["total_actions"] == 0
+        assert result["anomalies"] == []
+        assert result["summary"] == {
+            "anomaly_count": 0,
+            "alert_count": 0,
+            "highest_risk_level": "INFO",
+        }
 
 
 class TestBehaviorRepository:

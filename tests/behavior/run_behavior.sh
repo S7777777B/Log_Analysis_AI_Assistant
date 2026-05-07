@@ -81,22 +81,10 @@ run_formal_tests() {
     python3 -m pytest -v tests/behavior
 }
 
-run_local_regression_tests() {
-    echo -e "${BLUE}运行本地行为模块回归测试...${NC}"
-    cd "$PROJECT_ROOT"
-    python3 -m pytest -v local_only/tests
-}
-
-run_all_behavior_tests() {
-    echo -e "${BLUE}运行 Behavior 全量测试...${NC}"
-    cd "$PROJECT_ROOT"
-    python3 -m pytest -v tests/behavior local_only/tests
-}
-
 run_behavior_demo() {
-    echo -e "${BLUE}运行 Behavior 模块工作流演示测试...${NC}"
+    echo -e "${BLUE}运行 Behavior 模块完整流程测试...${NC}"
     cd "$PROJECT_ROOT"
-    python3 tests/behavior/test_behavior.py
+    python3 -m pytest -v tests/behavior/test_behavior.py
 }
 
 configure_behavior() {
@@ -111,13 +99,10 @@ show_info() {
     echo "  - 行为配置文件: $PROJECT_ROOT/config/behavior.env"
     echo "  - 正式测试目录: $PROJECT_ROOT/tests/behavior"
     echo "  - 行为脚本目录: $PROJECT_ROOT/tests/behavior"
-    echo "  - 本地回归测试: $PROJECT_ROOT/local_only/tests"
-    echo "  - VPN 样本数据: $PROJECT_ROOT/local_only/vpn_output/vpn_logs.jsonl"
     echo ""
     echo -e "${BLUE}推荐命令:${NC}"
     echo "  python3 -m pytest -v tests/behavior"
-    echo "  python3 -m pytest -v local_only/tests"
-    echo "  python3 tests/behavior/test_behavior.py"
+    echo "  python3 -m pytest -v tests/behavior/test_behavior.py"
     echo "  python3 tests/behavior/behavior_config_cli.py"
 }
 
@@ -125,12 +110,10 @@ print_menu() {
     echo ""
     echo -e "${YELLOW}请选择要执行的操作:${NC}"
     echo "1. 运行正式行为模块测试 (tests/behavior)"
-    echo "2. 运行本地行为模块回归测试 (local_only/tests)"
-    echo "3. 运行 Behavior 全量测试"
-    echo "4. 运行 Behavior 模块演示入口"
-    echo "5. 交互式配置 Behavior 参数"
-    echo "6. 显示路径和推荐命令"
-    echo "7. 退出"
+    echo "2. 运行 Behavior 模块完整流程测试"
+    echo "3. 交互式配置 Behavior 参数"
+    echo "4. 显示路径和推荐命令"
+    echo "5. 退出"
     echo ""
 }
 
@@ -138,28 +121,22 @@ main() {
     print_header
     check_environment
     print_menu
-    read -r -p "请输入选项 (1-7): " choice
+    read -r -p "请输入选项 (1-5): " choice
 
     case "$choice" in
         1)
             run_formal_tests
             ;;
         2)
-            run_local_regression_tests
-            ;;
-        3)
-            run_all_behavior_tests
-            ;;
-        4)
             run_behavior_demo
             ;;
-        5)
+        3)
             configure_behavior
             ;;
-        6)
+        4)
             show_info
             ;;
-        7)
+        5)
             echo "已退出"
             ;;
         *)

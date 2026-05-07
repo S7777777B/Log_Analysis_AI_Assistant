@@ -265,7 +265,7 @@ pytest --cov=src tests/
 
 说明：
 - `tests/behavior/run_behavior.sh` 和 `tests/behavior/behavior_config_cli.py` 是本地辅助脚本，不是核心 pytest 入口。
-- `local_only` 下的 VPN 样本只用于可选演示测试，不是核心单元测试依赖。
+- `local_only/` 仅供本地调试；云端 behavior 测试不依赖 `local_only`，测试样本由 `pytest` fixture 构造。
 
 ### 5. 部署流程
 
