@@ -130,9 +130,13 @@ Log_Analysis_AI_Assistant/
 │   └── clickhouse.sql       # ClickHouse 表结构
 ├── tests/                   # 测试目录
 │   ├── __init__.py
+│   ├── behavior/
+│   │   ├── behavior_config_cli.py
+│   │   ├── run_behavior.sh
+│   │   └── test_behavior.py
 │   ├── test_collectors.py
 │   ├── test_parsers.py
-│   └── test_behavior.py
+│   └── ...
 └── logs/                    # 运行日志目录
     └── .gitkeep
 ```

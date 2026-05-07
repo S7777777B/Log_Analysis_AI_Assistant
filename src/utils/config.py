@@ -82,7 +82,7 @@ class Settings(BaseSettings):
         return self.dashscope_api_key is not None
     
     class Config:
-        env_file = ".env"
+        env_file = (".env", "config/behavior.env")
         env_file_encoding = "utf-8"
         case_sensitive = False
 
