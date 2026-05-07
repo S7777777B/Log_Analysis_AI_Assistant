@@ -9,6 +9,7 @@
 docker pull clickhouse/clickhouse-server:latest
 
 # 启动 ClickHouse 容器
+# 注：这里可以直接用setup_project.sh脚本中的选项3一键启动所有容器，但是clickhouse启动需要一点时间，等待2分钟即可
 docker run -d \
   --name clickhouse-server \
   --ulimit nofile=262144:262144 \
