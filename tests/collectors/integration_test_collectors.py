@@ -297,11 +297,8 @@ def start_filebeat():
     result = subprocess.run(["docker", "ps", "--filter", "name=filebeat", "--format", "{{.Names}}"],
                            capture_output=True, text=True)
     if "filebeat" in result.stdout:
-        fmt.print_info("Filebeat 容器已在运行，停止并重新启动...")
-        subprocess.run(["docker", "stop", "filebeat"], 
-                      stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        subprocess.run(["docker", "rm", "filebeat"], 
-                      stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        fmt.print_success("Filebeat 容器已在运行，跳过启动")
+        return None  # 返回 None 表示使用容器
     
     # 启动 Filebeat 容器
     fmt.print_info("启动 Filebeat 容器...")
