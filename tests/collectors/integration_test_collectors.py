@@ -522,9 +522,10 @@ def main():
         
         # 等待 Filebeat 采集和传输
         fmt.print_step(5, "等待日志采集和传输")
-        fmt.print_info("等待 10 秒让 Filebeat 采集并发送日志到 Kafka...")
-        for i in range(1, 11):
-            fmt.print_progress(i, 10, "等待日志传输")
+        fmt.print_info("等待 30 秒让 Filebeat 采集并发送日志到 Kafka...")
+        fmt.print_info("(Filebeat 默认每 10 秒扫描一次新文件)")
+        for i in range(1, 31):
+            fmt.print_progress(i, 30, "等待日志传输")
             time.sleep(1)
         print()  # 换行
         
