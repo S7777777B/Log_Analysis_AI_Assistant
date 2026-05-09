@@ -601,20 +601,31 @@ case $choice in
                 fi
                 echo -e "${GREEN}✓ 软件源更新成功${NC}"
                 
-                echo "下载 Filebeat（使用阿里云镜像）..."
-                curl -L -O https://mirrors.aliyun.com/elasticstack/beats/filebeat/filebeat-8.13.0-amd64.deb
+                echo "下载 Filebeat..."
+                FILEBEAT_DEB="filebeat-8.13.0-amd64.deb"
                 
-                if [ $? -ne 0 ]; then
-                    echo -e "${RED}❌ 下载 Filebeat 失败${NC}"
-                    echo "尝试使用官方源..."
-                    curl -L -O https://artifacts.elastic.co/downloads/beats/filebeat/filebeat-8.13.0-amd64.deb
+                # 先尝试官方源（更可靠）
+                curl -L -O https://artifacts.elastic.co/downloads/beats/filebeat/$FILEBEAT_DEB
+                
+                # 检查下载文件大小（正常应该 > 10MB）
+                FILE_SIZE=$(stat -c%s "$FILEBEAT_DEB" 2>/dev/null || echo 0)
+                MIN_SIZE=10485760  # 10MB
+                
+                if [ $FILE_SIZE -lt $MIN_SIZE ]; then
+                    echo -e "${RED}❌ 文件太小，可能是错误页面，尝试清华镜像...${NC}"
+                    rm -f "$FILEBEAT_DEB"
                     
-                    if [ $? -ne 0 ]; then
-                        echo -e "${RED}❌ 官方源下载也失败，请检查网络连接${NC}"
+                    # 尝试清华镜像
+                    curl -L -O https://mirrors.tuna.tsinghua.edu.cn/elasticstack/beats/filebeat/$FILEBEAT_DEB
+                    
+                    FILE_SIZE=$(stat -c%s "$FILEBEAT_DEB" 2>/dev/null || echo 0)
+                    if [ $FILE_SIZE -lt $MIN_SIZE ]; then
+                        echo -e "${RED}❌ 所有镜像源下载失败，请检查网络或手动下载${NC}"
+                        echo "手动下载地址: https://artifacts.elastic.co/downloads/beats/filebeat/$FILEBEAT_DEB"
                         exit 1
                     fi
                 fi
-                echo -e "${GREEN}✓ Filebeat 下载成功${NC}"
+                echo -e "${GREEN}✓ Filebeat 下载成功 (${FILE_SIZE} bytes)${NC}"
                 
                 echo "安装 Filebeat..."
                 sudo dpkg -i filebeat-8.13.0-amd64.deb
