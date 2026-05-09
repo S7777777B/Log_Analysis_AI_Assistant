@@ -579,17 +579,27 @@ case $choice in
         if ! command -v filebeat &>/dev/null; then
             echo -e "${YELLOW}⚠️  Filebeat 未安装，正在安装...${NC}"
             if command -v apt &>/dev/null; then
+                echo "使用国内镜像源加速..."
+                
+                # 备份源
+                sudo cp -a /etc/apt/sources.list /etc/apt/sources.list.bak
+                
+                # 替换为清华源（Ubuntu）
+                sudo sed -i 's@http://archive.ubuntu.com/ubuntu@https://mirrors.tuna.tsinghua.edu.cn/ubuntu@g' /etc/apt/sources.list
+                sudo sed -i 's@http://security.ubuntu.com/ubuntu@https://mirrors.tuna.tsinghua.edu.cn/ubuntu@g' /etc/apt/sources.list
+                
                 echo "更新软件源..."
                 sudo apt update -y > /dev/null 2>&1
                 
-                echo "下载 Filebeat..."
-                curl -L -O https://artifacts.elastic.co/downloads/beats/filebeat/filebeat-8.13.0-amd64.deb > /dev/null 2>&1
+                echo "下载 Filebeat（使用阿里云镜像）..."
+                curl -L -O https://mirrors.aliyun.com/elasticstack/beats/filebeat/filebeat-8.13.0-amd64.deb > /dev/null 2>&1
                 
                 echo "安装 Filebeat..."
                 sudo dpkg -i filebeat-8.13.0-amd64.deb > /dev/null 2>&1
                 
                 if [ $? -eq 0 ]; then
                     echo -e "${GREEN}✓ Filebeat 安装成功${NC}"
+                    rm -f filebeat-8.13.0-amd64.deb
                 else
                     echo -e "${RED}❌ Filebeat 安装失败${NC}"
                     exit 1
