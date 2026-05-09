@@ -2,127 +2,140 @@
 """
 Behavior 模块总流程测试。
 
-本测试参考 feature-storage 分支中
-tests/collectors/storage/storage_test.py 的 workflow 组织方式，
-只保留 behavior 模块从输入到输出的核心流程验证。
+
+测试目标：
+1. 验证行为日志标准化；
+2. 验证用户行为基线构建；
+3. 验证用户画像生成；
+4. 验证异常行为检测；
+5. 验证 BehaviorAnalysisService 统一分析流程。
 """
 
 from __future__ import annotations
 
-import json
 from typing import Any, Dict, List
 
 import pytest
 
+from src.behavior.anomaly import AnomalyDetector
+from src.behavior.baseline import BehaviorBaseline
 from src.behavior.normalizer import normalize_behavior_log
+from src.behavior.normalizer import get_username
 from src.behavior.service import BehaviorAnalysisService
+from src.behavior.user_profile import UserProfile
 from src.utils.config import settings
 
 TARGET_USER = "zhangsan"
 OTHER_USER = "lisi"
 
 
-def _print_section(title: str) -> None:
-    print("\n" + "=" * 70)
-    print(title)
-    print("=" * 70)
-
-
-def _print_step(message: str) -> None:
-    print(f"\n[测试步骤] {message}")
-
-
-def _print_json(title: str, data: object) -> None:
-    print(f"\n{title}:")
-    print(json.dumps(data, ensure_ascii=False, indent=2, default=str))
-
-
-def _sample_logs(logs: List[Dict[str, Any]], limit: int = 2) -> List[Dict[str, Any]]:
-    return [
-        {
-            "timestamp": log.get("timestamp"),
-            "username": log.get("username") or log.get("user") or log.get("account"),
-            "source_ip": (
-                log.get("source_ip") or log.get("src_ip") or log.get("remote_addr") or log.get("ip")
-            ),
-            "location": log.get("location") or log.get("src_city"),
-            "action": log.get("action") or log.get("event_type") or log.get("log_type"),
-            "endpoint": log.get("endpoint") or log.get("uri"),
-            "status": log.get("status") or log.get("result"),
-        }
-        for log in logs[:limit]
+def test_behavior_normalization_workflow(history_logs: List[Dict[str, Any]]) -> None:
+    """normalize_behavior_log 应能统一别名字段并过滤无效日志。"""
+    normalized_logs = [
+        normalized
+        for normalized in (normalize_behavior_log(log) for log in history_logs)
+        if normalized is not None
     ]
 
+    assert len(normalized_logs) == 6
+    assert any(log["username"] == TARGET_USER for log in normalized_logs)
+    assert any(log["username"] == OTHER_USER for log in normalized_logs)
+    assert all("source_ip" in log for log in normalized_logs if log["username"] == TARGET_USER)
+    assert any(log.get("endpoint") == "/api/orders" for log in normalized_logs)
+    assert any(log.get("status") == "FAIL" for log in normalized_logs)
 
-def _summarize_baseline(baseline: Dict[str, Any]) -> Dict[str, Any]:
-    return {
-        "username": baseline.get("username"),
-        "sample_count": baseline.get("sample_count"),
-        "common_ips": baseline.get("common_ips"),
-        "common_locations": baseline.get("common_locations"),
-        "failed_login_count": baseline.get("failed_login_count"),
-        "failed_login_rate": baseline.get("failed_login_rate"),
+
+def test_behavior_baseline_workflow(history_logs: List[Dict[str, Any]]) -> None:
+    """BehaviorBaseline 应能从混合日志中提炼目标用户常态。"""
+    baseline = BehaviorBaseline(TARGET_USER).build_baseline(history_logs)
+
+    assert baseline["username"] == TARGET_USER
+    assert baseline["sample_count"] == 5
+    assert "10.0.0.1" in baseline["common_ips"]
+    assert "北京" in baseline["common_locations"]
+    assert baseline["action_frequency"] == {"LOGIN": 4, "API_CALL": 1}
+    assert baseline["api_frequency"] == {"/api/orders": 1}
+    assert baseline["failed_login_count"] == 1
+    assert baseline["failed_login_rate"] == 0.25
+
+
+def test_behavior_profile_workflow(history_logs: List[Dict[str, Any]]) -> None:
+    """UserProfile 应能生成稳定的用户画像摘要。"""
+    profile = UserProfile(TARGET_USER).build_from_logs(history_logs).get_profile()
+
+    assert profile["username"] == TARGET_USER
+    assert profile["total_actions"] == 5
+    assert "10.0.0.1" in profile["common_ips"]
+    assert "北京" in profile["common_locations"]
+    assert profile["failed_login_count"] == 1
+    assert {"09:00", "09:30", "10:30", "11:00"}.issubset(set(profile["login_times"]))
+    assert profile["baseline"]["sample_count"] == 5
+
+
+def test_behavior_anomaly_workflow(
+    baseline: Dict[str, Any],
+    suspicious_detection_logs: List[Dict[str, Any]],
+) -> None:
+    """AnomalyDetector 应能识别核心风险模式。"""
+    user_detection_logs = [
+        log for log in suspicious_detection_logs if get_username(log) == TARGET_USER
+    ]
+    anomalies = AnomalyDetector().detect_batch(user_detection_logs, baseline)
+    matched_rules = {
+        rule
+        for anomaly in anomalies
+        for rule in anomaly["context"].get("matched_rules", [])
     }
 
+    assert "UNUSUAL_TIME" in matched_rules
+    assert "UNUSUAL_IP" in matched_rules
+    assert "UNUSUAL_LOCATION" in matched_rules
+    assert "SENSITIVE_ACTION" in matched_rules
+    assert "MULTI_IP_LOGIN" in matched_rules
+    assert "HIGH_FREQUENCY" in matched_rules
+    assert "FAILED_LOGIN_SPIKE" in matched_rules
+    assert all(anomaly["username"] == TARGET_USER for anomaly in anomalies)
+    assert all(0.0 <= anomaly["anomaly_score"] <= 1.0 for anomaly in anomalies)
+    assert all(anomaly["description"] for anomaly in anomalies)
+    assert all(anomaly["risk_level"] in {"LOW", "MEDIUM", "HIGH", "CRITICAL"} for anomaly in anomalies)
 
-def _summarize_profile(profile: Dict[str, Any]) -> Dict[str, Any]:
-    return {
-        "username": profile.get("username"),
-        "total_actions": profile.get("total_actions"),
-        "common_ips": profile.get("common_ips"),
-        "common_locations": profile.get("common_locations"),
-        "login_times": profile.get("login_times"),
-    }
 
-
-def _summarize_anomalies(anomalies: List[Dict[str, Any]]) -> Dict[str, Any]:
-    matched_rules = sorted(
-        {
-            rule
-            for anomaly in anomalies
-            for rule in anomaly.get("context", {}).get("matched_rules", [])
-        }
+def test_behavior_high_risk_alert_workflow(
+    baseline: Dict[str, Any],
+    suspicious_detection_logs: List[Dict[str, Any]],
+) -> None:
+    """高风险敏感操作应能产生受 threshold 控制的告警。"""
+    sensitive_log = next(
+        log
+        for log in suspicious_detection_logs
+        if log.get("endpoint") == "/api/admin/export" or log.get("uri") == "/api/admin/export"
     )
-    return {
-        "anomaly_count": len(anomalies),
-        "alert_count": sum(1 for item in anomalies if item.get("is_alert")),
-        "matched_rules": matched_rules,
-        "risk_levels": sorted({item.get("risk_level") for item in anomalies if item.get("risk_level")}),
-    }
+
+    alert = AnomalyDetector(threshold=0.7).detect_log(sensitive_log, baseline)
+    suppressed = AnomalyDetector(threshold=0.8).detect_log(sensitive_log, baseline)
+
+    assert alert is not None
+    assert alert["username"] == TARGET_USER
+    assert "SENSITIVE_ACTION" in alert["context"]["matched_rules"]
+    assert alert["anomaly_score"] >= 0.7
+    assert alert["risk_level"] in {"HIGH", "CRITICAL"}
+    assert alert["is_alert"] is True
+    assert suppressed is not None
+    assert suppressed["is_alert"] is False
 
 
-def test_behavior_service_summary_workflow(
+def test_behavior_service_workflow(
     history_logs: List[Dict[str, Any]],
     suspicious_detection_logs: List[Dict[str, Any]],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """BehaviorAnalysisService 应能输出目标用户的完整分析摘要。"""
-    _print_section("Behavior 模块服务摘要流程测试")
-    _print_json(
-        "输入摘要",
-        {
-            "target_user": TARGET_USER,
-            "other_user": OTHER_USER,
-            "history_log_count": len(history_logs),
-            "detection_log_count": len(suspicious_detection_logs),
-            "history_log_samples": _sample_logs(history_logs),
-            "detection_log_samples": _sample_logs(suspicious_detection_logs),
-        },
-    )
-
-    _print_step("调用 BehaviorAnalysisService.analyze_user 生成完整分析结果")
+    """BehaviorAnalysisService 应能统一输出画像、基线、异常和摘要。"""
     monkeypatch.setattr(settings, "min_samples_for_profile", 3)
     result = BehaviorAnalysisService().analyze_user(
         TARGET_USER,
         history_logs,
         detection_logs=suspicious_detection_logs,
     )
-
-    _print_step("检查 baseline、profile、anomalies 和 summary 的关键结果")
-    _print_json("Baseline 摘要", _summarize_baseline(result["baseline"]))
-    _print_json("Profile 摘要", _summarize_profile(result["profile"]))
-    _print_json("Anomalies 摘要", _summarize_anomalies(result["anomalies"]))
-    _print_json("Summary", result["summary"])
 
     assert result["username"] == TARGET_USER
     assert result["baseline"]["username"] == TARGET_USER
@@ -131,32 +144,14 @@ def test_behavior_service_summary_workflow(
     assert result["summary"]["alert_count"] >= 1
     assert result["summary"]["highest_risk_level"] in {"LOW", "MEDIUM", "HIGH", "CRITICAL"}
     assert result["baseline"]["sample_count"] == 5
-    assert "10.0.0.1" in result["baseline"]["common_ips"]
-    assert "北京" in result["profile"]["common_locations"]
     assert all(anomaly["username"] == TARGET_USER for anomaly in result["anomalies"])
-
-    _print_step("服务摘要流程测试通过")
 
 
 def test_behavior_end_to_end_workflow(
     history_logs: List[Dict[str, Any]],
     suspicious_detection_logs: List[Dict[str, Any]],
 ) -> None:
-    """原始日志经过标准化后应能完成 behavior 主流程。"""
-    _print_section("Behavior 模块端到端流程测试")
-    _print_json(
-        "原始输入摘要",
-        {
-            "target_user": TARGET_USER,
-            "other_user": OTHER_USER,
-            "history_log_count": len(history_logs),
-            "detection_log_count": len(suspicious_detection_logs),
-            "history_log_samples": _sample_logs(history_logs),
-            "detection_log_samples": _sample_logs(suspicious_detection_logs),
-        },
-    )
-
-    _print_step("步骤 1：标准化历史日志和检测日志")
+    """原始/结构化日志应能完成 behavior 主流程。"""
     normalized_history = [
         normalized
         for normalized in (normalize_behavior_log(log) for log in history_logs)
@@ -168,34 +163,16 @@ def test_behavior_end_to_end_workflow(
         if normalized is not None
     ]
 
-    _print_json(
-        "标准化结果摘要",
-        {
-            "normalized_history_count": len(normalized_history),
-            "normalized_detection_count": len(normalized_detection),
-            "normalized_history_samples": _sample_logs(normalized_history),
-            "normalized_detection_samples": _sample_logs(normalized_detection),
-        },
-    )
-
     assert any(log["username"] == TARGET_USER for log in normalized_history)
     assert any(log["username"] == OTHER_USER for log in normalized_history)
 
-    _print_step("步骤 2：执行 analyze_user，完成基线、画像、异常和汇总分析")
     result = BehaviorAnalysisService().analyze_user(
         TARGET_USER,
         normalized_history,
         detection_logs=normalized_detection,
     )
 
-    _print_json("Baseline 摘要", _summarize_baseline(result["baseline"]))
-    _print_json("Profile 摘要", _summarize_profile(result["profile"]))
-    _print_json("Anomalies 摘要", _summarize_anomalies(result["anomalies"]))
-    _print_json("Summary", result["summary"])
-
     assert result["baseline"]["sample_count"] == 5
     assert result["profile"]["total_actions"] == 5
     assert result["summary"]["anomaly_count"] == len(result["anomalies"])
     assert all(anomaly["username"] == TARGET_USER for anomaly in result["anomalies"])
-
-    _print_step("端到端流程测试通过")
