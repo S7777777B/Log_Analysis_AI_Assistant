@@ -18,10 +18,11 @@ services:
     ports:
       - "9092:9092"
     healthcheck:
-      test: ["CMD", "kafka-broker-api-versions", "--bootstrap-server", "localhost:9092"]
+      test: ["CMD-SHELL", "nc -z localhost 9092 || exit 1"]
       interval: 5s
       timeout: 10s
-      retries: 10
+      retries: 20
+      start_period: 30s
 
   # ClickHouse 服务
   clickhouse:

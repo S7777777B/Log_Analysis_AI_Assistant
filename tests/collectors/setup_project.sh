@@ -574,8 +574,8 @@ case $choice in
         echo "测试文件: tests/collectors/integration_test_collectors.py"
         echo ""
         
-        # 检查并启动容器化的 Filebeat
-        echo -e "${YELLOW}[1/3] 检查容器化 Filebeat...${NC}"
+        # 检查并启动所有容器化服务
+        echo -e "${YELLOW}[1/3] 检查容器化服务...${NC}"
         
         # 检查 Docker Compose 文件是否存在
         COMPOSE_FILE="$PROJECT_ROOT/tests/collectors/docker-compose-full.yml"
@@ -597,19 +597,38 @@ case $choice in
             DOCKER_COMPOSE_CMD="docker compose"
         fi
         
-        # 检查 Filebeat 容器是否已运行
-        if $DOCKER_CMD ps --filter "name=filebeat" --format "{{.Names}}" | grep -q "filebeat"; then
-            echo -e "${GREEN}✓ Filebeat 容器已在运行${NC}"
-        else
-            echo "启动 Filebeat 容器..."
-            $DOCKER_COMPOSE_CMD -f "$COMPOSE_FILE" up -d filebeat
-            
-            if [ $? -eq 0 ]; then
-                echo -e "${GREEN}✓ Filebeat 容器启动成功${NC}"
-            else
-                echo -e "${RED}❌ Filebeat 容器启动失败${NC}"
+        # 先启动 Kafka 和 ClickHouse 服务
+        echo "启动 Kafka 和 ClickHouse 服务..."
+        $DOCKER_COMPOSE_CMD -f "$COMPOSE_FILE" up -d kafka clickhouse
+        
+        if [ $? -ne 0 ]; then
+            echo -e "${RED}❌ 启动基础服务失败${NC}"
+            exit 1
+        fi
+        
+        # 等待 Kafka 启动
+        echo "等待 Kafka 服务就绪..."
+        for i in {1..30}; do
+            if $DOCKER_CMD ps --filter "name=kafka-kraft" --filter "status=running" --format "{{.Names}}" | grep -q "kafka-kraft"; then
+                echo -e "${GREEN}✓ Kafka 服务已启动${NC}"
+                break
+            fi
+            if [ $i -eq 30 ]; then
+                echo -e "${RED}❌ Kafka 启动超时${NC}"
                 exit 1
             fi
+            sleep 2
+        done
+        
+        # 启动 Filebeat 容器
+        echo "启动 Filebeat 容器..."
+        $DOCKER_COMPOSE_CMD -f "$COMPOSE_FILE" up -d filebeat
+        
+        if [ $? -eq 0 ]; then
+            echo -e "${GREEN}✓ Filebeat 容器启动成功${NC}"
+        else
+            echo -e "${RED}❌ Filebeat 容器启动失败${NC}"
+            exit 1
         fi
         
         echo ""
