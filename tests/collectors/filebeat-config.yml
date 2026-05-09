@@ -3,7 +3,7 @@ filebeat.inputs:
   enabled: true
   paths:
     - /var/log/*.log
-    - /var/log/sample/*.log
+    - /logs/sample/*.log
 
 output.kafka:
   hosts: ["kafka:9092"]

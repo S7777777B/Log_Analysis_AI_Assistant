@@ -74,8 +74,9 @@ services:
     user: root
     volumes:
       - /var/log:/var/log:ro
-      - ./sample_logs:/var/log/sample:ro
+      - ./sample_logs:/logs/sample:ro
       - ./filebeat-config.yml:/usr/share/filebeat/filebeat.yml:ro
+      - ~/programs/Log_Analysis_AI_Assistant/logs/filebeat:/var/log/filebeat
     depends_on:
       kafka:
         condition: service_healthy
