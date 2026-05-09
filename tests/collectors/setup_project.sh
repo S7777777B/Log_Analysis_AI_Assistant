@@ -658,7 +658,7 @@ case $choice in
         # 配置 Filebeat
         echo -e "${YELLOW}[2/3] 配置 Filebeat...${NC}"
         sudo mkdir -p /etc/filebeat
-        cat > /etc/filebeat/filebeat.yml << 'EOF'
+        sudo tee /etc/filebeat/filebeat.yml > /dev/null << 'EOF'
 filebeat.inputs:
 - type: log
   enabled: true
