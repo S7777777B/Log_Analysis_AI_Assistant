@@ -66,6 +66,24 @@ services:
       timeout: 5s
       retries: 5
 
+  # Filebeat 服务
+  filebeat:
+    image: docker.elastic.co/beats/filebeat:8.13.0
+    container_name: filebeat
+    user: root
+    volumes:
+      - /var/log:/var/log:ro
+      - ./sample_logs:/var/log/sample:ro
+      - ./filebeat-config.yml:/usr/share/filebeat/filebeat.yml:ro
+    depends_on:
+      kafka:
+        condition: service_healthy
+    environment:
+      - KAFKA_HOST=kafka:9092
+    restart: unless-stopped
+    networks:
+      - default
+
 volumes:
   clickhouse-data:
     driver: local

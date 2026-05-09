@@ -574,128 +574,42 @@ case $choice in
         echo "测试文件: tests/collectors/integration_test_collectors.py"
         echo ""
         
-        # 检查并安装 Filebeat
-        echo -e "${YELLOW}[1/3] 检查 Filebeat 依赖...${NC}"
-        if ! command -v filebeat &>/dev/null; then
-            echo -e "${YELLOW}⚠️  Filebeat 未安装，正在安装...${NC}"
-            if command -v apt &>/dev/null; then
-                echo "使用国内镜像源加速..."
-                
-                # 备份源（如果未备份过）
-                if [ ! -f /etc/apt/sources.list.bak ]; then
-                    echo "备份软件源配置..."
-                    sudo cp -a /etc/apt/sources.list /etc/apt/sources.list.bak
-                fi
-                
-                # 替换为清华源（Ubuntu）
-                echo "切换到清华源..."
-                sudo sed -i 's@http://archive.ubuntu.com/ubuntu@https://mirrors.tuna.tsinghua.edu.cn/ubuntu@g' /etc/apt/sources.list
-                sudo sed -i 's@http://security.ubuntu.com/ubuntu@https://mirrors.tuna.tsinghua.edu.cn/ubuntu@g' /etc/apt/sources.list
-                
-                echo "更新软件源..."
-                sudo apt update -y
-                
-                if [ $? -ne 0 ]; then
-                    echo -e "${RED}❌ 更新软件源失败${NC}"
-                    exit 1
-                fi
-                echo -e "${GREEN}✓ 软件源更新成功${NC}"
-                
-                echo "下载 Filebeat..."
-                FILEBEAT_DEB="filebeat-8.13.0-amd64.deb"
-                
-                # 先尝试官方源（更可靠）
-                curl -L -O https://artifacts.elastic.co/downloads/beats/filebeat/$FILEBEAT_DEB
-                
-                # 检查下载文件大小（正常应该 > 10MB）
-                FILE_SIZE=$(stat -c%s "$FILEBEAT_DEB" 2>/dev/null || echo 0)
-                MIN_SIZE=10485760  # 10MB
-                
-                if [ $FILE_SIZE -lt $MIN_SIZE ]; then
-                    echo -e "${RED}❌ 文件太小，可能是错误页面，尝试清华镜像...${NC}"
-                    rm -f "$FILEBEAT_DEB"
-                    
-                    # 尝试清华镜像
-                    curl -L -O https://mirrors.tuna.tsinghua.edu.cn/elasticstack/beats/filebeat/$FILEBEAT_DEB
-                    
-                    FILE_SIZE=$(stat -c%s "$FILEBEAT_DEB" 2>/dev/null || echo 0)
-                    if [ $FILE_SIZE -lt $MIN_SIZE ]; then
-                        echo -e "${RED}❌ 所有镜像源下载失败，请检查网络或手动下载${NC}"
-                        echo "手动下载地址: https://artifacts.elastic.co/downloads/beats/filebeat/$FILEBEAT_DEB"
-                        exit 1
-                    fi
-                fi
-                echo -e "${GREEN}✓ Filebeat 下载成功 (${FILE_SIZE} bytes)${NC}"
-                
-                echo "安装 Filebeat..."
-                sudo dpkg -i filebeat-8.13.0-amd64.deb
-                
-                if [ $? -eq 0 ]; then
-                    echo -e "${GREEN}✓ Filebeat 安装成功${NC}"
-                    rm -f filebeat-8.13.0-amd64.deb
-                else
-                    echo -e "${RED}❌ Filebeat 安装失败${NC}"
-                    echo "尝试修复依赖..."
-                    sudo apt-get install -f -y
-                    sudo dpkg -i filebeat-8.13.0-amd64.deb
-                    
-                    if [ $? -eq 0 ]; then
-                        echo -e "${GREEN}✓ Filebeat 安装成功（修复依赖后）${NC}"
-                        rm -f filebeat-8.13.0-amd64.deb
-                    else
-                        echo -e "${RED}❌ Filebeat 安装失败，无法修复依赖${NC}"
-                        exit 1
-                    fi
-                fi
-            else
-                echo -e "${RED}❌ 不支持的系统，请手动安装 Filebeat${NC}"
-                exit 1
-            fi
-        else
-            echo -e "${GREEN}✓ Filebeat 已安装${NC}"
+        # 检查并启动容器化的 Filebeat
+        echo -e "${YELLOW}[1/3] 检查容器化 Filebeat...${NC}"
+        
+        # 检查 Docker Compose 文件是否存在
+        COMPOSE_FILE="$PROJECT_ROOT/tests/collectors/docker-compose-full.yml"
+        if [ ! -f "$COMPOSE_FILE" ]; then
+            echo -e "${RED}❌ 未找到 Docker Compose 文件: $COMPOSE_FILE${NC}"
+            exit 1
         fi
         
-        # 配置 Filebeat
-        echo -e "${YELLOW}[2/3] 配置 Filebeat...${NC}"
-        sudo mkdir -p /etc/filebeat
-        sudo tee /etc/filebeat/filebeat.yml > /dev/null << 'EOF'
-filebeat.inputs:
-- type: log
-  enabled: true
-  paths:
-    - /var/log/*.log
-    - ~/programs/Log_Analysis_AI_Assistant/tests/collectors/sample_logs/*.log
-
-output.kafka:
-  hosts: ["localhost:9092"]
-  topic: logs_raw
-  partition.round_robin:
-    reachable_only: false
-  required_acks: 1
-  compression: gzip
-  max_message_bytes: 10485760
-
-logging.level: info
-logging.to_files: true
-logging.files:
-  path: /var/log/filebeat
-  name: filebeat
-  keepfiles: 7
-  permissions: 0644
-EOF
-        echo -e "${GREEN}✓ Filebeat 配置完成${NC}"
-        
-        # 启动 Filebeat
-        echo -e "${YELLOW}[3/3] 启动 Filebeat...${NC}"
-        sudo systemctl enable filebeat > /dev/null 2>&1
-        sudo systemctl restart filebeat
-        
-        if [ $? -eq 0 ]; then
-            echo -e "${GREEN}✓ Filebeat 启动成功${NC}"
+        # 检查 Docker 是否可用
+        if ! docker ps &>/dev/null; then
+            if ! sudo docker ps &>/dev/null; then
+                echo -e "${RED}❌ Docker 服务未运行或无法访问${NC}"
+                exit 1
+            fi
+            DOCKER_CMD="sudo docker"
+            DOCKER_COMPOSE_CMD="sudo docker compose"
         else
-            echo -e "${YELLOW}⚠️  Filebeat 启动失败，尝试手动启动${NC}"
-            sudo filebeat -e -c /etc/filebeat/filebeat.yml &
-            sleep 5
+            DOCKER_CMD="docker"
+            DOCKER_COMPOSE_CMD="docker compose"
+        fi
+        
+        # 检查 Filebeat 容器是否已运行
+        if $DOCKER_CMD ps --filter "name=filebeat" --format "{{.Names}}" | grep -q "filebeat"; then
+            echo -e "${GREEN}✓ Filebeat 容器已在运行${NC}"
+        else
+            echo "启动 Filebeat 容器..."
+            $DOCKER_COMPOSE_CMD -f "$COMPOSE_FILE" up -d filebeat
+            
+            if [ $? -eq 0 ]; then
+                echo -e "${GREEN}✓ Filebeat 容器启动成功${NC}"
+            else
+                echo -e "${RED}❌ Filebeat 容器启动失败${NC}"
+                exit 1
+            fi
         fi
         
         echo ""

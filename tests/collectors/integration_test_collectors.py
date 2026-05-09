@@ -83,12 +83,11 @@ class TerminalFormatter:
 fmt = TerminalFormatter()
 
 def check_prerequisites() -> bool:
-    """检查系统依赖"""
+    """检查系统依赖（容器化版本）"""
     fmt.print_step(1, "检查系统依赖")
     
     dependencies = [
         ("docker", ["docker", "--version"], "Docker"),
-        ("filebeat", ["filebeat", "version"], "Filebeat"),
     ]
     
     missing = []
@@ -99,6 +98,17 @@ def check_prerequisites() -> bool:
         except:
             missing.append(display_name)
             fmt.print_error(f"{display_name} 未安装")
+    
+    # 检查 Filebeat 容器是否运行
+    try:
+        result = subprocess.run(["docker", "ps", "--filter", "name=filebeat", "--format", "{{.Names}}"],
+                               capture_output=True, text=True)
+        if "filebeat" in result.stdout:
+            fmt.print_success("Filebeat 容器已运行")
+        else:
+            fmt.print_warning("Filebeat 容器未运行，将在测试中启动")
+    except:
+        fmt.print_warning("无法检查 Filebeat 容器状态")
     
     try:
         from kafka import KafkaConsumer
@@ -115,19 +125,35 @@ def check_prerequisites() -> bool:
     return True
 
 def start_kafka_with_docker() -> Path:
-    """启动 Kafka 容器"""
+    """启动 Kafka 容器（优先使用已运行的容器）"""
     fmt.print_step(2, "启动 Kafka 容器")
     
     compose_file = PROJECT_ROOT / "docker-compose.yml"
+    
+    # 检查是否已有运行的 Kafka 容器
+    result = subprocess.run(["docker", "ps", "--filter", "name=kafka", "--format", "{{.Names}}"],
+                           capture_output=True, text=True)
+    if "kafka" in result.stdout:
+        fmt.print_info("检测到已运行的 Kafka 容器，直接使用...")
+        # 检查端口是否可用
+        import socket
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        sock.settimeout(2)
+        if sock.connect_ex(('localhost', 9092)) == 0:
+            sock.close()
+            fmt.print_success("Kafka 服务已就绪")
+            return None  # 返回 None 表示使用现有容器，不需要清理
+        sock.close()
     
     fmt.print_info("清理现有容器...")
     subprocess.run(["docker", "rm", "-f", "kafka-kraft"], 
                    stderr=subprocess.DEVNULL, stdout=subprocess.DEVNULL)
     
+    # 使用国内镜像
     compose_content = """
 services:
   kafka:
-    image: apache/kafka:latest
+    image: registry.cn-hangzhou.aliyuncs.com/apache/kafka:latest
     container_name: kafka-kraft
     environment:
       KAFKA_NODE_ID: 1
@@ -147,7 +173,16 @@ services:
     fmt.print_info("启动 Kafka 服务...")
     subprocess.run(["docker", "compose", "-f", str(compose_file), "down", "--remove-orphans"],
                    stderr=subprocess.DEVNULL, stdout=subprocess.DEVNULL)
-    subprocess.run(["docker", "compose", "-f", str(compose_file), "up", "-d"], check=True)
+    
+    try:
+        subprocess.run(["docker", "compose", "-f", str(compose_file), "up", "-d"], check=True)
+    except subprocess.CalledProcessError:
+        fmt.print_error("使用阿里云镜像失败，尝试官方镜像...")
+        # 尝试使用官方镜像
+        compose_content = compose_content.replace("registry.cn-hangzhou.aliyuncs.com/apache/kafka:latest", "apache/kafka:latest")
+        with open(compose_file, 'w') as f:
+            f.write(compose_content)
+        subprocess.run(["docker", "compose", "-f", str(compose_file), "up", "-d"], check=True)
     
     fmt.print_success("Kafka 容器已启动")
     wait_for_kafka()
@@ -253,82 +288,36 @@ def generate_vpn_logs() -> bool:
     return True
 
 def start_filebeat():
-    """启动 Filebeat 服务"""
-    fmt.print_step(4, "启动 Filebeat 服务")
+    """启动容器化的 Filebeat 服务"""
+    fmt.print_step(4, "启动 Filebeat 容器")
     
-    # 清理旧数据
-    data_dir = PROJECT_ROOT / "filebeat_data"
-    logs_dir = PROJECT_ROOT / "filebeat_logs"
+    compose_file = PROJECT_ROOT / "tests" / "collectors" / "docker-compose-full.yml"
     
-    fmt.print_info("清理旧数据目录...")
+    # 检查容器是否已运行
+    result = subprocess.run(["docker", "ps", "--filter", "name=filebeat", "--format", "{{.Names}}"],
+                           capture_output=True, text=True)
+    if "filebeat" in result.stdout:
+        fmt.print_info("Filebeat 容器已在运行，停止并重新启动...")
+        subprocess.run(["docker", "stop", "filebeat"], 
+                      stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        subprocess.run(["docker", "rm", "filebeat"], 
+                      stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     
-    #停止正在运行的 Filebeat 进程
-    subprocess.run(["sudo", "pkill", "-f", "filebeat"], 
-                  stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    time.sleep(2)
+    # 启动 Filebeat 容器
+    fmt.print_info("启动 Filebeat 容器...")
+    subprocess.run(["docker", "compose", "-f", str(compose_file), "up", "-d", "filebeat"], check=True)
     
-    #删除目录
-    for dir_path in [data_dir, logs_dir]:
-        if dir_path.exists():
-            try:
-                # 尝试不使用 sudo
-                shutil.rmtree(dir_path)
-                fmt.print_info(f"已删除目录: {dir_path}")
-            except PermissionError:
-                # 如果权限不足，使用 sudo
-                fmt.print_info(f"使用 sudo 删除目录: {dir_path}")
-                subprocess.run(["sudo", "rm", "-rf", str(dir_path)], 
-                              check=True)
+    # 等待容器启动
+    fmt.print_info("等待 Filebeat 容器就绪...")
+    for _ in range(10):
+        result = subprocess.run(["docker", "ps", "--filter", "name=filebeat", "--filter", "status=running", "--format", "{{.Names}}"],
+                               capture_output=True, text=True)
+        if "filebeat" in result.stdout:
+            fmt.print_success("Filebeat 容器已启动")
+            return None  # 返回 None 表示使用容器
+        time.sleep(2)
     
-    #重新创建目录并设置权限
-    for dir_path in [data_dir, logs_dir]:
-        dir_path.mkdir(exist_ok=True, parents=True)
-        #设置权限
-        subprocess.run(["sudo", "chown", "-R", f"{os.getenv('USER')}:{os.getenv('USER')}", str(dir_path)], 
-                      check=False)
-        subprocess.run(["sudo", "chmod", "-R", "755", str(dir_path)], 
-                      check=False)
-    
-    #检查配置文件
-    config_path = PROJECT_ROOT / "config" / "filebeat.yml"
-    if not config_path.exists():
-        raise FileNotFoundError(f"配置文件不存在: {config_path}")
-    
-    fmt.print_info("启动 Filebeat 进程...")
-    
-    try:
-        # 首先检查当前用户是否有运行 filebeat 的权限
-        result = subprocess.run(["filebeat", "test", "config", "-c", str(config_path)], 
-                               capture_output=True, text=True, timeout=5)
-        if result.returncode == 0:
-            cmd = [
-                "filebeat", "-e",
-                "-c", str(config_path.absolute()),
-                "--path.data", str(data_dir),
-                "--path.logs", str(logs_dir),
-                "--strict.perms=false",
-            ]
-            fmt.print_info("以普通用户身份启动 Filebeat")
-        else:
-            raise PermissionError("需要管理员权限")
-    except (subprocess.TimeoutExpired, PermissionError):
-        cmd = [
-            "sudo", "filebeat", "-e",
-            "-c", str(config_path.absolute()),
-            "--path.data", str(data_dir),
-            "--path.logs", str(logs_dir),
-            "--strict.perms=false",
-        ]
-        fmt.print_info("以 sudo 身份启动 Filebeat")
-    
-    # 启动进程
-    proc = subprocess.Popen(cmd, cwd=str(PROJECT_ROOT),
-                           stdout=subprocess.DEVNULL,
-                           stderr=subprocess.DEVNULL)
-    
-    fmt.print_success(f"Filebeat 已启动，PID: {proc.pid}")
-    time.sleep(5)  # 等待Filebeat
-    return proc
+    raise RuntimeError("Filebeat 容器启动超时")
 
 def test_consumption(collector_class, min_messages: int = 5, timeout: int = 30) -> bool:
     """测试采集器消费能力"""
@@ -472,27 +461,19 @@ def test_incremental_collection(collector_class) -> bool:
     return False
 
 def cleanup(kafka_compose_file: Path, filebeat_proc):
-    """清理测试环境"""
+    """清理测试环境（容器化版本）"""
     fmt.print_section("清理测试环境")
     
-    fmt.print_info("停止 Filebeat...")
-    if filebeat_proc:
-        # 先尝试正常终止
-        filebeat_proc.terminate()
-        try:
-            filebeat_proc.wait(timeout=5)
-            fmt.print_success("Filebeat 已停止")
-        except subprocess.TimeoutExpired:
-            fmt.print_warning("Filebeat 未正常停止，强制终止...")
-            filebeat_proc.kill()
-            filebeat_proc.wait(timeout=2)
-            fmt.print_success("Filebeat 已强制终止")
-    
-    # 确保没有遗留的 Filebeat 进程
-    fmt.print_info("清理可能的僵尸进程...")
-    subprocess.run(["sudo", "pkill", "-9", "-f", "filebeat"], 
-                  stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    time.sleep(1)
+    # 停止 Filebeat 容器
+    fmt.print_info("停止 Filebeat 容器...")
+    try:
+        subprocess.run(["docker", "stop", "filebeat"], 
+                      stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        subprocess.run(["docker", "rm", "filebeat"], 
+                      stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        fmt.print_success("Filebeat 容器已停止并移除")
+    except:
+        fmt.print_info("Filebeat 容器未运行，跳过")
     
     # 清理数据目录
     fmt.print_info("清理数据目录...")
@@ -502,11 +483,9 @@ def cleanup(kafka_compose_file: Path, filebeat_proc):
     for dir_path in [data_dir, logs_dir]:
         if dir_path.exists():
             try:
-                # 尝试普通删除
                 shutil.rmtree(dir_path)
                 fmt.print_info(f"已删除目录: {dir_path.name}")
             except PermissionError:
-                # 如果权限不足，使用 sudo
                 subprocess.run(["sudo", "rm", "-rf", str(dir_path)], 
                               stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
                 fmt.print_info(f"已用 sudo 删除目录: {dir_path.name}")
