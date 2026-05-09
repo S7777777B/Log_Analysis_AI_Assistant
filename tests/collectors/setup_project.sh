@@ -382,8 +382,16 @@ start_docker_services() {
         echo -e "${GREEN}✓ Docker Compose 已安装${NC}"
     fi
     
-    echo "停止并清理旧容器..."
-    $DOCKER_COMPOSE_CMD -f "$COMPOSE_FILE" down -v 2>/dev/null || true
+    echo "检查容器运行状态..."
+    if $DOCKER_COMPOSE_CMD -f "$COMPOSE_FILE" ps 2>/dev/null | grep -q "Up"; then
+        echo -e "${GREEN}✓ 容器已在运行中${NC}"
+        $DOCKER_COMPOSE_CMD -f "$COMPOSE_FILE" ps
+        echo ""
+        echo -e "${BLUE}服务信息:${NC}"
+        echo "  - Kafka: localhost:9092"
+        echo "  - ClickHouse: localhost:8123"
+        return 0
+    fi
     
     echo "启动容器..."
     $DOCKER_COMPOSE_CMD -f "$COMPOSE_FILE" up -d
