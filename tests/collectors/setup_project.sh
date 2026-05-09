@@ -581,28 +581,60 @@ case $choice in
             if command -v apt &>/dev/null; then
                 echo "使用国内镜像源加速..."
                 
-                # 备份源
-                sudo cp -a /etc/apt/sources.list /etc/apt/sources.list.bak
+                # 备份源（如果未备份过）
+                if [ ! -f /etc/apt/sources.list.bak ]; then
+                    echo "备份软件源配置..."
+                    sudo cp -a /etc/apt/sources.list /etc/apt/sources.list.bak
+                fi
                 
                 # 替换为清华源（Ubuntu）
+                echo "切换到清华源..."
                 sudo sed -i 's@http://archive.ubuntu.com/ubuntu@https://mirrors.tuna.tsinghua.edu.cn/ubuntu@g' /etc/apt/sources.list
                 sudo sed -i 's@http://security.ubuntu.com/ubuntu@https://mirrors.tuna.tsinghua.edu.cn/ubuntu@g' /etc/apt/sources.list
                 
                 echo "更新软件源..."
-                sudo apt update -y > /dev/null 2>&1
+                sudo apt update -y
+                
+                if [ $? -ne 0 ]; then
+                    echo -e "${RED}❌ 更新软件源失败${NC}"
+                    exit 1
+                fi
+                echo -e "${GREEN}✓ 软件源更新成功${NC}"
                 
                 echo "下载 Filebeat（使用阿里云镜像）..."
-                curl -L -O https://mirrors.aliyun.com/elasticstack/beats/filebeat/filebeat-8.13.0-amd64.deb > /dev/null 2>&1
+                curl -L -O https://mirrors.aliyun.com/elasticstack/beats/filebeat/filebeat-8.13.0-amd64.deb
+                
+                if [ $? -ne 0 ]; then
+                    echo -e "${RED}❌ 下载 Filebeat 失败${NC}"
+                    echo "尝试使用官方源..."
+                    curl -L -O https://artifacts.elastic.co/downloads/beats/filebeat/filebeat-8.13.0-amd64.deb
+                    
+                    if [ $? -ne 0 ]; then
+                        echo -e "${RED}❌ 官方源下载也失败，请检查网络连接${NC}"
+                        exit 1
+                    fi
+                fi
+                echo -e "${GREEN}✓ Filebeat 下载成功${NC}"
                 
                 echo "安装 Filebeat..."
-                sudo dpkg -i filebeat-8.13.0-amd64.deb > /dev/null 2>&1
+                sudo dpkg -i filebeat-8.13.0-amd64.deb
                 
                 if [ $? -eq 0 ]; then
                     echo -e "${GREEN}✓ Filebeat 安装成功${NC}"
                     rm -f filebeat-8.13.0-amd64.deb
                 else
                     echo -e "${RED}❌ Filebeat 安装失败${NC}"
-                    exit 1
+                    echo "尝试修复依赖..."
+                    sudo apt-get install -f -y
+                    sudo dpkg -i filebeat-8.13.0-amd64.deb
+                    
+                    if [ $? -eq 0 ]; then
+                        echo -e "${GREEN}✓ Filebeat 安装成功（修复依赖后）${NC}"
+                        rm -f filebeat-8.13.0-amd64.deb
+                    else
+                        echo -e "${RED}❌ Filebeat 安装失败，无法修复依赖${NC}"
+                        exit 1
+                    fi
                 fi
             else
                 echo -e "${RED}❌ 不支持的系统，请手动安装 Filebeat${NC}"
