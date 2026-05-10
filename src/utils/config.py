@@ -44,6 +44,9 @@ class Settings(BaseSettings):
     es_user: Optional[str] = Field(default=None, env="ES_USER")
     es_password: Optional[str] = Field(default=None, env="ES_PASSWORD")
     
+    # 日志采集配置
+    log_sources_config: str = Field(default="config/log_sources.yml", env="LOG_SOURCES_CONFIG")
+    
     # 应用配置
     log_level: str = Field(default="INFO", env="LOG_LEVEL")
     log_output_dir: str = Field(default="logs", env="LOG_OUTPUT_DIR")
@@ -85,6 +88,7 @@ class Settings(BaseSettings):
         env_file = (".env", "config/behavior.env")
         env_file_encoding = "utf-8"
         case_sensitive = False
+        extra = "ignore"
 
 
 # 全局配置实例
