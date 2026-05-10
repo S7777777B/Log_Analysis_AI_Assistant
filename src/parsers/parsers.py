@@ -255,6 +255,9 @@ class StandardLogSchema:
         if "parsed_at" not in standard_log:
             standard_log["parsed_at"] = datetime.now()
         
+        if "collected_at" not in standard_log:
+            standard_log["collected_at"] = datetime.now()
+        
         return standard_log
     
     @classmethod
