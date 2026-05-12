@@ -37,6 +37,12 @@ env/
 *.swo
 *~
 
+# AI assistant local files
+.codex
+local_only/
+AGENTS.md
+BEHAVIOR_MODULE_PLAN.md
+
 # 日志文件
 logs/
 *.log
