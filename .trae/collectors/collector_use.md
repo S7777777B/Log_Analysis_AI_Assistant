@@ -9,15 +9,27 @@
 
 两者均继承自 `BaseCollector`，共享日志验证与丰富逻辑。
 
+<<<<<<< HEAD
+=======
+**重要更新**：Filebeat 已实现容器化部署，无需在宿主机安装。
+
+>>>>>>> feature-visualization
 ## 2. 环境要求与版本清单
 
 | 组件             | 最低版本   | 测试版本     | 用途               |
 | ---------------- | ---------- | ------------ | ------------------ |
 | Python           | 3.9        | 3.10.x       | 运行采集器         |
 | kafka-python     | 2.3.0      | 2.3.0        | Kafka 客户端       |
+<<<<<<< HEAD
 | Apache Kafka     | 3.0        | 3.7.0        | 消息队列           |
 | Filebeat         | 7.x        | 8.19.13      | 日志采集（可选）   |
 | Docker           | 20.10      | 最新         | 运行 Kafka         |
+=======
+| Apache Kafka     | 3.0        | 3.7.0        | 消息队列（容器化） |
+| Filebeat         | 8.x        | 8.13.0       | 日志采集（容器化） |
+| ClickHouse       | 22.0       | 24.x         | 数据存储（容器化） |
+| Docker           | 20.10      | 最新         | 容器运行           |
+>>>>>>> feature-visualization
 | Docker Compose   | 2.0        | v5.1.1       | 容器编排           |
 
 ## 3. 快速测试指南
@@ -28,11 +40,16 @@
 
 ```bash
 # 进入项目根目录
+<<<<<<< HEAD
 cd /path/to/Log_Analysis_AI_Assistant
+=======
+cd ~/programs/Log_Analysis_AI_Assistant
+>>>>>>> feature-visualization
 
 # 激活虚拟环境
 source venv/bin/activate
 
+<<<<<<< HEAD
 # 修复 filebeat_data 目录权限（如果之前使用 sudo 运行过）
 sudo chown -R $USER:$USER /home/syb/Downloads/project/Log_Analysis_AI_Assistant/filebeat_data
 
@@ -58,12 +75,54 @@ sudo apt install filebeat=8.19.13
 ```
 
 ### 4.2 安装 Docker 与 Docker Compose
+=======
+# 启动 Docker 服务（如未启动）
+sudo systemctl enable docker
+sudo systemctl start docker
+
+# 确保日志目录存在
+mkdir -p logs/filebeat
+
+# 运行集成测试（通过 setup_project.sh）
+./tests/collectors/setup_project.sh
+# 选择选项 8: 运行完整集成测试
+```
+
+### 3.2 直接启动容器（开发调试）
+
+```bash
+# 启动所有服务（Kafka + ClickHouse + Filebeat）
+docker compose -f tests/collectors/docker-compose-full.yml up -d
+
+# 查看服务状态
+docker compose -f tests/collectors/docker-compose-full.yml ps
+
+# 查看 Filebeat 日志
+docker logs filebeat
+
+# 停止服务
+docker compose -f tests/collectors/docker-compose-full.yml down
+```
+
+## 4. 安装步骤
+
+> **注意**：自 v1.2.0 起，Filebeat 已容器化，无需在宿主机安装！
+
+### 4.1 仅需安装 Docker 与 Docker Compose
+>>>>>>> feature-visualization
 
 ```bash
 curl -fsSL https://get.docker.com -o get-docker.sh && sudo sh get-docker.sh
 sudo apt install docker-compose-plugin
 sudo systemctl enable docker
 sudo systemctl start docker
+<<<<<<< HEAD
+=======
+
+# 将用户加入 docker 组（避免 sudo）
+sudo usermod -aG docker $USER
+# 重新登录后生效
+>>>>>>> feature-visualization
 ```
 
 ## 5. 采集器接口与使用方法
@@ -195,32 +254,69 @@ for log in collector.collect():
 ```
 Log_Analysis_AI_Assistant/
 ├── config/
+<<<<<<< HEAD
 │   └── filebeat.yml
 ├── tests/collectors/
 │   ├── simulate_logs.py                 # 日志模拟器
 │   ├── integration_test_collectors.py   # 集成测试
 │   └── sample_logs/                     # 日志生成目录
+=======
+│   └── filebeat.yml                     # 备用配置（宿主机部署）
+├── tests/collectors/
+│   ├── simulate_logs.py                 # 日志模拟器
+│   ├── integration_test_collectors.py   # 集成测试
+│   ├── sample_logs/                     # 日志生成目录
+│   ├── docker-compose-full.yml          # Docker Compose 完整配置
+│   └── filebeat-config.yml              # 容器化 Filebeat 配置
+>>>>>>> feature-visualization
 ├── src/collectors/
 │   ├── __init__.py
 │   ├── base.py                          # 基类接口
 │   ├── filebeat.py                      # FilebeatCollector 实现
 │   └── flume.py                         # FlumeCollector 实现
+<<<<<<< HEAD
 ├── docker-compose.yml
+=======
+├── logs/
+│   └── filebeat/                        # Filebeat 容器日志目录
+>>>>>>> feature-visualization
 └── venv/                                # 虚拟环境
 ```
 
 ## 8. 注意事项
 
 1. **路径问题**：所有相对路径都相对于项目根目录。
+<<<<<<< HEAD
 2. **权限问题**：Filebeat 不要用 `sudo` 运行，否则会产生 root 权限文件；若之前使用过 `sudo`，请运行 `sudo chown -R $USER:$USER filebeat_data` 修复。
+=======
+2. **容器化部署**：自 v1.2.0 起，Filebeat 已容器化，无需在宿主机安装。
+>>>>>>> feature-visualization
 3. **虚拟环境**：确保在运行脚本前激活虚拟环境（`source venv/bin/activate`）。
 4. **Docker 权限**：确保用户有 Docker 执行权限（加入 `docker` 组）。
 5. **测试顺序**：建议先确保 Docker 和 Kafka 正常运行，再执行集成测试。
 6. **资源清理**：测试完成后及时清理 Docker 容器，避免占用资源。
 7. **测试数据**：集成测试会自动生成硬编码的测试数据并在日志中显示，确保测试可验证。
+<<<<<<< HEAD
+=======
+8. **日志目录**：确保 `logs/filebeat/` 目录存在且可写。
+>>>>>>> feature-visualization
 
 ## 9. 测试状态
 
 - ✅ **采集器单元测试**: 通过
 - ✅ **Kafka 集成测试**: 通过
+<<<<<<< HEAD
 - ✅ **端到端集成测试**: 通过（日志生成 → Kafka → 采集器 → ClickHouse）
+=======
+- ✅ **容器化部署测试**: 通过
+- ⏳ **端到端集成测试**: 进行中（日志生成 → Filebeat容器 → Kafka → 采集器 → ClickHouse）
+
+## 10. 更新日志
+
+### v1.2.0 (2026-05-13)
+- ✅ 实现 Filebeat 容器化部署
+- ✅ 更新 Docker Compose 配置，整合 Kafka、ClickHouse、Filebeat
+- ✅ 修复容器启动顺序问题（Kafka 就绪后再启动 Filebeat）
+- ✅ 修复 Filebeat 挂载目录权限问题
+- ✅ 优化集成测试流程，支持容器化服务检测
+>>>>>>> feature-visualization

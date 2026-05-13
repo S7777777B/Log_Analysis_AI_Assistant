@@ -564,5 +564,32 @@ streamlit run dashboard.py --server.port 8502
 
 **提示**: 将此文件放在手边，开发时快速查阅！
 
-**更新日期**: 2026-04-29
-**当前状态**: 数据存储模块（Kafka + ClickHouse）测试通过
+**更新日期**: 2026-05-13
+**当前状态**: 采集模块容器化完成，端到端测试进行中
+
+## 容器化部署速查
+
+```bash
+# 启动所有服务（Kafka + ClickHouse + Filebeat）
+docker compose -f tests/collectors/docker-compose-full.yml up -d
+
+# 查看服务状态
+docker compose -f tests/collectors/docker-compose-full.yml ps
+
+# 查看 Filebeat 日志
+docker logs filebeat
+
+# 停止服务
+docker compose -f tests/collectors/docker-compose-full.yml down
+
+# 清理所有资源（包括数据卷）
+docker compose -f tests/collectors/docker-compose-full.yml down -v
+```
+
+## 数据流向
+
+```
+日志源 → Filebeat(容器) → Kafka → FilebeatCollector → ClickHouse
+                                                   ↓
+                                             Streamlit 可视化
+```
