@@ -258,13 +258,13 @@ git push origin feature/your-feature-name
 ### Python 环境
 
 ```bash
-# 安装依赖
+# 安装依赖（由用户自己执行，AI 不运行此命令）
 pip install -r requirements.txt
 
-# 更新依赖
+# 更新依赖（由用户自己执行，AI 不运行此命令）
 pip install --upgrade -r requirements.txt
 
-# 导出依赖
+# 导出依赖（由用户自己执行，AI 不运行此命令）
 pip freeze > requirements.txt
 
 # 运行主程序
@@ -276,6 +276,8 @@ pytest tests/ -v
 # 运行测试并生成覆盖率报告
 pytest tests/ --cov=src --cov-report=html
 ```
+
+**注意**: 所有 `pip install` 和 `pip freeze` 命令由用户自己执行，AI 不运行此类命令。
 
 ### Streamlit 可视化
 
@@ -337,5 +339,5 @@ mypy src/
 
 ---
 
-**最后更新**: 2026-03-21
-**版本**: 1.0.0
+**最后更新**: 2026-04-29
+**版本**: 1.1.0
