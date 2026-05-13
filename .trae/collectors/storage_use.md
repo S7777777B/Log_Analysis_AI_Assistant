@@ -1,4 +1,3 @@
-```markdown
 # Log Analysis AI Assistant - 存储模块使用文档
 
 ## 1. 概述
@@ -11,6 +10,8 @@
 
 三者均遵循统一的配置字典初始化模式，便于集成到数据处理流水线中。
 
+**重要更新**：所有服务已容器化部署，通过 Docker Compose 一键启动。
+
 ## 2. 环境要求与版本清单
 
 | 组件                   | 最低版本 | 测试版本 | 用途                     |
@@ -19,10 +20,10 @@
 | clickhouse-connect     | 0.7.0    | 0.7.16   | ClickHouse 驱动          |
 | kafka-python           | 2.3.0    | 2.3.0    | Kafka 客户端             |
 | elasticsearch          | 8.0.0    | 8.17.0   | Elasticsearch 客户端     |
-| Apache Kafka           | 3.0      | 3.7.0    | 消息队列                 |
-| ClickHouse             | 22.0     | 24.x     | 列式数据库               |
-| Elasticsearch          | 8.0      | 8.17.0   | 搜索引擎（可选）         |
-| Docker / Docker Compose| 20.10    | 最新     | 测试环境容器编排         |
+| Apache Kafka           | 3.0      | 3.7.0    | 消息队列（容器化）       |
+| ClickHouse             | 22.0     | 24.x     | 列式数据库（容器化）     |
+| Elasticsearch          | 8.0      | 8.17.0   | 搜索引擎（可选，容器化） |
+| Docker / Docker Compose| 20.10    | 最新     | 容器编排                 |
 
 ## 3. 安装依赖
 
@@ -349,8 +350,38 @@ python tests/collectors/storage/collect_and_storage_test.py
 
 ## 9. 注意事项
 
-1. **密码安全**：测试脚本中使用了硬编码密码 `clickhouse`，生产环境请通过环境变量或配置文件管理敏感信息。
-2. **资源占用**：两个测试脚本均会启动 Docker 容器，测试完成后会自动清理，若中途退出请手动执行 `docker compose down -v` 释放资源。
+1. **密码安全**：测试脚本中使用了示例密码，生产环境请通过环境变量（`CLICKHOUSE_USER`、`CLICKHOUSE_PASSWORD`）管理敏感信息。
+2. **资源占用**：两个测试脚本均会启动 Docker 容器，测试完成后会自动清理，若中途退出请手动执行 `docker compose -f tests/collectors/docker-compose-full.yml down -v` 释放资源。
 3. **端口冲突**：若本地已运行 Kafka（9092）或 ClickHouse（8123），请先停止对应服务或修改脚本中的端口映射。
-4.**Elasticsearch**:该模块由于虚拟机配置原因启动过慢暂未测试
+4. **Elasticsearch**：该模块由于虚拟机配置原因启动过慢暂未测试，如需启用请修改 Docker Compose 配置。
+5. **容器化部署**：自 v1.2.0 起，所有服务已容器化，通过 Docker Compose 一键启动，无需手动安装 Kafka、ClickHouse、Filebeat。
+
+## 10. 更新日志
+
+### v1.2.0 (2026-05-13)
+- ✅ 所有服务容器化部署（Kafka + ClickHouse + Filebeat）
+- ✅ 统一 ClickHouse 账号配置（通过环境变量）
+- ✅ 更新 Docker Compose 配置文件位置（`tests/collectors/docker-compose-full.yml`）
+- ✅ 优化容器启动顺序，确保服务依赖正确
+
+## 11. 容器化部署速查
+
+```bash
+# 启动所有服务
+docker compose -f tests/collectors/docker-compose-full.yml up -d
+
+# 查看服务状态
+docker compose -f tests/collectors/docker-compose-full.yml ps
+
+# 查看 ClickHouse 日志
+docker logs clickhouse-server
+
+# 查看 Kafka 日志
+docker logs kafka-kraft
+
+# 停止服务
+docker compose -f tests/collectors/docker-compose-full.yml down
+
+# 清理所有资源（包括数据卷）
+docker compose -f tests/collectors/docker-compose-full.yml down -v
 ```
