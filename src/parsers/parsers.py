@@ -1,4 +1,3 @@
-<<<<<<< HEAD
 """
 日志解析器集合
 
@@ -781,7 +780,6 @@ def create_parser(log_type: str = 'auto', config: Optional[Dict[str, Any]] = Non
         return create_default_logparser()
     else:
         return create_default_logparser()
-=======
 """
 日志解析器集合
 
@@ -1561,4 +1559,3 @@ def create_parser(log_type: str = 'auto', config: Optional[Dict[str, Any]] = Non
         return create_default_logparser()
     else:
         return create_default_logparser()
->>>>>>> origin/feature
