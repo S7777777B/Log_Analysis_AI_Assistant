@@ -142,22 +142,54 @@ class ActionType(Enum):
 class StandardLogSchema:
     """
     标准日志 Schema 定义
-    将所有日志统一转换为标准格式
+    将所有日志统一转换为标准格式，支持用户行为分析和风险分析
+    
+    字段分类：
+    1. 核心标识字段（必填）：唯一标识一条日志
+    2. 5W1H行为分析字段：Who/What/When/Where/Why/How
+    3. 用户行为基线字段：用于判断行为是否异常
+    4. 风险分析字段：风险评分和标签
+    5. 系统时间字段：日志生命周期时间戳
+    6. 扩展字段：原始日志和解析信息
     """
     
     REQUIRED_FIELDS = [
-        "timestamp",
-        "log_type",
-        "username",
-        "action",
-        "source_ip",
+        "timestamp",             # When: 日志生成时间
+        "log_type",              # 日志类型
+        "username",              # Who: 用户名
+        "action",                # What: 行为动作
+        "source_ip",             # Where: 来源IP
     ]
     
     OPTIONAL_FIELDS = [
-        "id",
-        "user_id",
-        "event_type",
-        "destination_ip",
+        # === 5W1H 行为分析字段 ===
+        "user_id",               # Who: 用户ID
+        "dept",                  # Who: 部门
+        "role",                  # Who: 角色
+        "event_type",            # What: 事件类型
+        "result",                # What: 结果
+        "fail_reason",           # Why: 失败原因
+        "destination_ip",        # Where: 目标IP
+        "vpn_gateway",           # Where: 接入网关
+        "src_country",           # Where: 来源国家
+        "src_city",              # Where: 来源城市
+        "protocol",              # How: 协议
+        "auth_method",           # How: 认证方式
+        "client_software",       # How: 客户端
+        "session_id",            # How: 会话ID
+        
+        # === 用户行为基线字段 ===
+        "is_off_hours",          # 是否非工作时间
+        "is_unusual_ip",         # 是否异常IP
+        "session_duration_sec",  # 会话时长
+        "bytes_sent",            # 发送字节
+        "bytes_recv",            # 接收字节
+        
+        # === 风险分析字段 ===
+        "risk_score",            # 风险评分 0-100
+        "risk_tags",             # 风险标签
+        
+        # === 通用扩展字段 ===
         "user_agent",
         "uri",
         "method",
@@ -167,13 +199,17 @@ class StandardLogSchema:
         "severity_level",
         "device_info",
         "location",
-        "session_id",
         "request_id",
-        "raw_log",
-        "parser",
-        "parse_status",
-        "collected_at",
-        "parsed_at",
+        
+        # === 系统时间字段 ===
+        "collected_at",          # 日志采集时间
+        "parsed_at",             # 日志解析时间
+        "indexed_at",            # 日志入库时间
+        
+        # === 原始数据 ===
+        "raw_log",               # 原始日志
+        "parser",                # 解析器
+        "parse_status",          # 解析状态
     ]
     
     FIELD_TYPES = {
@@ -434,6 +470,7 @@ COMMON_PATTERNS = {
     'nginx_access': r'^(?P<remote_addr>[\d.]+)\s+-\s+(?P<remote_user>\S+)\s+\[(?P<timestamp>[^\]]+)\]\s+"(?P<method>\w+)\s+(?P<uri>\S+)\s+(?P<protocol>[^"]+)"\s+(?P<status>\d+)\s+(?P<body_bytes_sent>\d+)\s+"(?P<http_referer>[^"]*)"\s+"(?P<http_user_agent>[^"]*)"',
     'syslog': r'^(?P<timestamp>\w{3}\s+\d{1,2}\s+\d{2}:\d{2}:\d{2})\s+(?P<hostname>\S+)\s+(?P<program>\S+?)(\[(?P<pid>\d+)\])?:\s+(?P<message>.*)$',
     'vpn_login': r'^(?P<timestamp>\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2})\s+(?P<action>LOGIN|LOGOUT)\s+user=(?P<username>\w+)\s+ip=(?P<source_ip>[\d.]+)\s+status=(?P<status>\w+)',
+    'vpn_gateway': r'^(?P<timestamp>\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2})\s+(?P<vpn_gateway>\S+)\s+vpnd:\s+event=(?P<event_type>\S+)\s+user=(?P<username>\S+)\s+dept=(?P<dept>\S+)\s+src_ip=(?P<src_ip>[\d.]+)\s+src_geo=(?P<src_country>[^/]+)/(?P<src_city>\S+)\s+proto=(?P<protocol>\S+)\s+auth=(?P<auth_method>\S+)\s+client="(?P<client_software>[^"]+)"\s+session=(?P<session_id>\S+)\s+result=(?P<result>\S+)(?:\s+reason=(?P<fail_reason>[^ ]+))?(?:\s+duration=(?P<duration>\d+)s)?(?:\s+bytes_recv=(?P<bytes_recv>\d+))?(?:\s+bytes_sent=(?P<bytes_sent>\d+))?\s+risk_score=(?P<risk_score>\d+)\s+risk_tags="(?P<risk_tags>[^"]*)"',
     'fortinet_vpn': r'^date=(?P<timestamp>\d{4}-\d{2}-\d{2})\s+time=(?P<time>\d{2}:\d{2}:\d{2})\s+logid=\d+\s+type=event\s+subtype=vpn\s+level=notice\s+vd=root\s+user=(?P<username>\S+)\s+group=\S+\s+srcip=(?P<source_ip>[\d.]+)\s+action=(?P<action>ssl-login|ssl-logout)',
     'oa_system': r'^(?P<timestamp>\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2})\s+\[(?P<level>\w+)\]\s+user:(?P<username>\w+)\s+action:(?P<action>\w+)\s+module:(?P<module>\w+)\s+(?P<detail>.*)$',
     'api_call': r'^(?P<timestamp>\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z?)\s+(?P<method>GET|POST|PUT|DELETE|PATCH)\s+(?P<uri>/\S+)\s+user=(?P<username>\S+)\s+status=(?P<status>\d+)\s+response_time=(?P<response_time>[\d.]+)ms',
@@ -614,6 +651,11 @@ PREDEFINED_PATTERNS = {
         'regex': r'^(?P<timestamp>\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2})\s+(?P<action>LOGIN|LOGOUT)\s+user=(?P<username>\w+)\s+ip=(?P<source_ip>[\d.]+)\s+status=(?P<status>\w+)',
         'log_type': 'vpn',
         'description': 'VPN 登录/登出日志',
+    },
+    'vpn_gateway': {
+        'regex': r'^(?P<timestamp>\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2})\s+(?P<vpn_gateway>\S+)\s+vpnd:\s+event=(?P<event_type>\S+)\s+user=(?P<username>\S+)\s+dept=(?P<dept>\S+)\s+src_ip=(?P<src_ip>[\d.]+)\s+src_geo=(?P<src_country>[^/]+)/(?P<src_city>\S+)\s+proto=(?P<protocol>\S+)\s+auth=(?P<auth_method>\S+)\s+client="(?P<client_software>[^"]+)"\s+session=(?P<session_id>\S+)\s+result=(?P<result>\S+)(?:\s+reason=(?P<fail_reason>[^ ]+))?(?:\s+duration=(?P<duration>\d+)s)?(?:\s+bytes_recv=(?P<bytes_recv>\d+))?(?:\s+bytes_sent=(?P<bytes_sent>\d+))?\s+risk_score=(?P<risk_score>\d+)\s+risk_tags="(?P<risk_tags>[^"]*)"',
+        'log_type': 'vpn',
+        'description': 'VPN 网关日志（含 5W1H 要素和行为基线）',
     },
     'oa_access': {
         'regex': r'^(?P<timestamp>\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2})\s+\[(?P<level>\w+)\]\s+user:(?P<username>\w+)\s+action:(?P<action>\w+)\s+module:(?P<module>\w+)\s+(?P<detail>.*)$',
@@ -821,22 +863,54 @@ class ActionType(Enum):
 class StandardLogSchema:
     """
     标准日志 Schema 定义
-    将所有日志统一转换为标准格式
+    将所有日志统一转换为标准格式，支持用户行为分析和风险分析
+    
+    字段分类：
+    1. 核心标识字段（必填）：唯一标识一条日志
+    2. 5W1H行为分析字段：Who/What/When/Where/Why/How
+    3. 用户行为基线字段：用于判断行为是否异常
+    4. 风险分析字段：风险评分和标签
+    5. 系统时间字段：日志生命周期时间戳
+    6. 扩展字段：原始日志和解析信息
     """
     
     REQUIRED_FIELDS = [
-        "timestamp",
-        "log_type",
-        "username",
-        "action",
-        "source_ip",
+        "timestamp",             # When: 日志生成时间
+        "log_type",              # 日志类型
+        "username",              # Who: 用户名
+        "action",                # What: 行为动作
+        "source_ip",             # Where: 来源IP
     ]
     
     OPTIONAL_FIELDS = [
-        "id",
-        "user_id",
-        "event_type",
-        "destination_ip",
+        # === 5W1H 行为分析字段 ===
+        "user_id",               # Who: 用户ID
+        "dept",                  # Who: 部门
+        "role",                  # Who: 角色
+        "event_type",            # What: 事件类型
+        "result",                # What: 结果
+        "fail_reason",           # Why: 失败原因
+        "destination_ip",        # Where: 目标IP
+        "vpn_gateway",           # Where: 接入网关
+        "src_country",           # Where: 来源国家
+        "src_city",              # Where: 来源城市
+        "protocol",              # How: 协议
+        "auth_method",           # How: 认证方式
+        "client_software",       # How: 客户端
+        "session_id",            # How: 会话ID
+        
+        # === 用户行为基线字段 ===
+        "is_off_hours",          # 是否非工作时间
+        "is_unusual_ip",         # 是否异常IP
+        "session_duration_sec",  # 会话时长
+        "bytes_sent",            # 发送字节
+        "bytes_recv",            # 接收字节
+        
+        # === 风险分析字段 ===
+        "risk_score",            # 风险评分 0-100
+        "risk_tags",             # 风险标签
+        
+        # === 通用扩展字段 ===
         "user_agent",
         "uri",
         "method",
@@ -846,13 +920,17 @@ class StandardLogSchema:
         "severity_level",
         "device_info",
         "location",
-        "session_id",
         "request_id",
-        "raw_log",
-        "parser",
-        "parse_status",
-        "collected_at",
-        "parsed_at",
+        
+        # === 系统时间字段 ===
+        "collected_at",          # 日志采集时间
+        "parsed_at",             # 日志解析时间
+        "indexed_at",            # 日志入库时间
+        
+        # === 原始数据 ===
+        "raw_log",               # 原始日志
+        "parser",                # 解析器
+        "parse_status",          # 解析状态
     ]
     
     FIELD_TYPES = {
@@ -881,6 +959,25 @@ class StandardLogSchema:
         "parse_status": str,
         "collected_at": datetime,
         "parsed_at": datetime,
+        "indexed_at": datetime,
+        # VPN专属字段
+        "dept": str,
+        "role": str,
+        "result": str,
+        "fail_reason": str,
+        "vpn_gateway": str,
+        "src_country": str,
+        "src_city": str,
+        "protocol": str,
+        "auth_method": str,
+        "client_software": str,
+        "is_off_hours": bool,
+        "is_unusual_ip": bool,
+        "session_duration_sec": int,
+        "bytes_sent": int,
+        "bytes_recv": int,
+        "risk_score": int,
+        "risk_tags": str,
     }
     
     LOG_TYPE_MAPPINGS = {
@@ -1083,7 +1180,7 @@ class FieldExtractor:
     @staticmethod
     def extract_action(parsed_data: Dict[str, Any]) -> Optional[str]:
         """提取行为动作"""
-        action_fields = ["action", "event", "operation", "activity", "behavior", "verb"]
+        action_fields = ["action", "event", "event_type", "operation", "activity", "behavior", "verb"]
         
         for field in action_fields:
             if field in parsed_data and parsed_data[field]:
@@ -1193,12 +1290,36 @@ class RegexParser(BaseParser):
                         action=extracted['action'] or 'UNKNOWN',
                         source_ip=extracted.get('source_ip'),
                         **{k: v for k, v in {
+                            # 5W1H 行为分析字段
+                            'user_id': parsed_data.get('user_id'),
+                            'dept': parsed_data.get('dept'),
+                            'role': parsed_data.get('role'),
+                            'event_type': parsed_data.get('event_type'),
+                            'result': parsed_data.get('result'),
+                            'fail_reason': parsed_data.get('fail_reason'),
                             'destination_ip': extracted.get('destination_ip'),
-                            'user_agent': parsed_data.get('user_agent'),
+                            'vpn_gateway': parsed_data.get('vpn_gateway'),
+                            'src_country': parsed_data.get('src_country'),
+                            'src_city': parsed_data.get('src_city'),
+                            'protocol': parsed_data.get('protocol'),
+                            'auth_method': parsed_data.get('auth_method'),
+                            'client_software': parsed_data.get('client_software'),
+                            'user_agent': parsed_data.get('user_agent') or parsed_data.get('client_software'),
                             'uri': parsed_data.get('uri'),
                             'method': parsed_data.get('method'),
                             'status_code': parsed_data.get('status'),
                             'detail': parsed_data.get('message'),
+                            'session_id': parsed_data.get('session_id'),
+                            'severity_level': parsed_data.get('level'),
+                            # 用户行为基线字段
+                            'is_off_hours': parsed_data.get('is_off_hours'),
+                            'is_unusual_ip': parsed_data.get('is_unusual_ip'),
+                            'session_duration_sec': parsed_data.get('session_duration_sec'),
+                            'bytes_sent': parsed_data.get('bytes_sent'),
+                            'bytes_recv': parsed_data.get('bytes_recv'),
+                            # 风险分析字段
+                            'risk_score': parsed_data.get('risk_score'),
+                            'risk_tags': parsed_data.get('risk_tags'),
                         }.items() if v is not None}
                     )
                     standard_log['raw_log'] = raw_log
@@ -1231,6 +1352,7 @@ COMMON_PATTERNS = {
     'nginx_access': r'^(?P<remote_addr>[\d.]+)\s+-\s+(?P<remote_user>\S+)\s+\[(?P<timestamp>[^\]]+)\]\s+"(?P<method>\w+)\s+(?P<uri>\S+)\s+(?P<protocol>[^"]+)"\s+(?P<status>\d+)\s+(?P<body_bytes_sent>\d+)\s+"(?P<http_referer>[^"]*)"\s+"(?P<http_user_agent>[^"]*)"',
     'syslog': r'^(?P<timestamp>\w{3}\s+\d{1,2}\s+\d{2}:\d{2}:\d{2})\s+(?P<hostname>\S+)\s+(?P<program>\S+?)(\[(?P<pid>\d+)\])?:\s+(?P<message>.*)$',
     'vpn_login': r'^(?P<timestamp>\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2})\s+(?P<action>LOGIN|LOGOUT)\s+user=(?P<username>\w+)\s+ip=(?P<source_ip>[\d.]+)\s+status=(?P<status>\w+)',
+    'vpn_gateway': r'^(?P<timestamp>\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2})\s+(?P<vpn_gateway>\S+)\s+vpnd:\s+event=(?P<event_type>\S+)\s+user=(?P<username>\S+)\s+dept=(?P<dept>\S+)\s+src_ip=(?P<src_ip>[\d.]+)\s+src_geo=(?P<src_country>[^/]+)/(?P<src_city>\S+)\s+proto=(?P<protocol>\S+)\s+auth=(?P<auth_method>\S+)\s+client="(?P<client_software>[^"]+)"\s+session=(?P<session_id>\S+)\s+result=(?P<result>\S+)(?:\s+reason=(?P<fail_reason>[^ ]+))?(?:\s+duration=(?P<duration>\d+)s)?(?:\s+bytes_recv=(?P<bytes_recv>\d+))?(?:\s+bytes_sent=(?P<bytes_sent>\d+))?\s+risk_score=(?P<risk_score>\d+)\s+risk_tags="(?P<risk_tags>[^"]*)"',
     'fortinet_vpn': r'^date=(?P<timestamp>\d{4}-\d{2}-\d{2})\s+time=(?P<time>\d{2}:\d{2}:\d{2})\s+logid=\d+\s+type=event\s+subtype=vpn\s+level=notice\s+vd=root\s+user=(?P<username>\S+)\s+group=\S+\s+srcip=(?P<source_ip>[\d.]+)\s+action=(?P<action>ssl-login|ssl-logout)',
     'oa_system': r'^(?P<timestamp>\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2})\s+\[(?P<level>\w+)\]\s+user:(?P<username>\w+)\s+action:(?P<action>\w+)\s+module:(?P<module>\w+)\s+(?P<detail>.*)$',
     'api_call': r'^(?P<timestamp>\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z?)\s+(?P<method>GET|POST|PUT|DELETE|PATCH)\s+(?P<uri>/\S+)\s+user=(?P<username>\S+)\s+status=(?P<status>\d+)\s+response_time=(?P<response_time>[\d.]+)ms',
@@ -1407,6 +1529,11 @@ class LogparserParser(BaseParser):
 
 
 PREDEFINED_PATTERNS = {
+    'vpn_gateway': {
+        'regex': r'^(?P<timestamp>\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2})\s+(?P<vpn_gateway>\S+)\s+vpnd:\s+event=(?P<event_type>\S+)\s+user=(?P<username>\S+)\s+dept=(?P<dept>\S+)\s+src_ip=(?P<src_ip>[\d.]+)\s+src_geo=(?P<src_country>[^/]+)/(?P<src_city>\S+)\s+proto=(?P<protocol>\S+)\s+auth=(?P<auth_method>\S+)\s+client="(?P<client_software>[^"]+)"\s+session=(?P<session_id>\S+)\s+result=(?P<result>\S+)(?:\s+reason=(?P<fail_reason>[^ ]+))?(?:\s+duration=(?P<duration>\d+)s)?(?:\s+bytes_recv=(?P<bytes_recv>\d+))?(?:\s+bytes_sent=(?P<bytes_sent>\d+))?\s+risk_score=(?P<risk_score>\d+)\s+risk_tags="(?P<risk_tags>[^"]*)"',
+        'log_type': 'vpn',
+        'description': 'VPN 网关日志（含 5W1H 要素和行为基线）',
+    },
     'vpn_login': {
         'regex': r'^(?P<timestamp>\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2})\s+(?P<action>LOGIN|LOGOUT)\s+user=(?P<username>\w+)\s+ip=(?P<source_ip>[\d.]+)\s+status=(?P<status>\w+)',
         'log_type': 'vpn',
