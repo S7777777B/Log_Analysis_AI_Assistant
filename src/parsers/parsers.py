@@ -315,109 +315,6 @@ class StandardLogSchema:
         return result
 
 
-class FieldExtractor:
-    """字段提取器"""
-    
-    @staticmethod
-    def extract_username(parsed_data: Dict[str, Any]) -> Optional[str]:
-        """提取用户名"""
-        username_fields = ["username", "user", "account", "uid", "user_id", "login_user"]
-        
-        for field in username_fields:
-            if field in parsed_data and parsed_data[field]:
-                return str(parsed_data[field])
-        
-        return None
-    
-    @staticmethod
-    def extract_ip(parsed_data: Dict[str, Any], ip_type: str = "source") -> Optional[str]:
-        """提取 IP 地址"""
-        if ip_type == "source":
-            ip_fields = ["source_ip", "src_ip", "ip", "remote_addr", "client_ip", "src"]
-        else:
-            ip_fields = ["destination_ip", "dst_ip", "dest_ip", "server_ip", "dst"]
-        
-        for field in ip_fields:
-            if field in parsed_data and parsed_data[field]:
-                return str(parsed_data[field])
-        
-        return None
-    
-    @staticmethod
-    def extract_timestamp(parsed_data: Dict[str, Any]) -> Optional[datetime]:
-        """提取时间戳"""
-        time_fields = ["timestamp", "time", "datetime", "date", "created_at", "@timestamp"]
-        
-        for field in time_fields:
-            if field in parsed_data and parsed_data[field]:
-                value = parsed_data[field]
-                
-                if isinstance(value, datetime):
-                    return value
-                
-                if isinstance(value, str):
-                    return FieldExtractor.parse_timestamp_string(value)
-                
-                if isinstance(value, (int, float)):
-                    return datetime.fromtimestamp(value)
-        
-        return None
-    
-    @staticmethod
-    def parse_timestamp_string(time_str: str) -> Optional[datetime]:
-        """解析时间字符串"""
-        formats = [
-            "%Y-%m-%d %H:%M:%S",
-            "%Y-%m-%dT%H:%M:%S",
-            "%Y-%m-%dT%H:%M:%SZ",
-            "%Y-%m-%dT%H:%M:%S.%f",
-            "%Y-%m-%dT%H:%M:%S.%fZ",
-            "%d/%b/%Y:%H:%M:%S %z",
-            "%b %d %H:%M:%S",
-        ]
-        
-        for fmt in formats:
-            try:
-                return datetime.strptime(time_str, fmt)
-            except ValueError:
-                continue
-        
-        try:
-            time_with_year = f"{datetime.now().year} {time_str}"
-            return datetime.strptime(time_with_year, "%Y %b %d %H:%M:%S")
-        except ValueError:
-            return None
-    
-    @staticmethod
-    def extract_action(parsed_data: Dict[str, Any]) -> Optional[str]:
-        """提取行为动作"""
-        action_fields = ["action", "event", "operation", "activity", "behavior", "verb"]
-        
-        for field in action_fields:
-            if field in parsed_data and parsed_data[field]:
-                return str(parsed_data[field])
-        
-        if "message" in parsed_data:
-            message = str(parsed_data["message"]).upper()
-            if "LOGIN" in message or "登入" in message:
-                return "LOGIN"
-            elif "LOGOUT" in message or "登出" in message:
-                return "LOGOUT"
-        
-        return None
-    
-    @staticmethod
-    def extract_all_fields(parsed_data: Dict[str, Any]) -> Dict[str, Any]:
-        """提取所有标准字段"""
-        return {
-            "username": FieldExtractor.extract_username(parsed_data),
-            "source_ip": FieldExtractor.extract_ip(parsed_data, "source"),
-            "destination_ip": FieldExtractor.extract_ip(parsed_data, "destination"),
-            "timestamp": FieldExtractor.extract_timestamp(parsed_data),
-            "action": FieldExtractor.extract_action(parsed_data),
-        }
-
-
 # ============================================================================
 # JSON 解析器
 # ============================================================================
@@ -497,7 +394,7 @@ class RegexParser(BaseParser):
                         log_type=self.log_type,
                         username=extracted['username'] or 'unknown',
                         action=extracted['action'] or 'UNKNOWN',
-                        source_ip=extracted['source_ip'] or '0.0.0.0',
+                        source_ip=extracted['source_ip'],
                         **{k: v for k, v in {
                             'destination_ip': extracted.get('destination_ip'),
                             'user_agent': parsed_data.get('user_agent'),
@@ -642,7 +539,7 @@ class LogparserParser(BaseParser):
                         log_type=pattern_info['log_type'],
                         username=extracted['username'] or 'unknown',
                         action=extracted['action'] or 'UNKNOWN',
-                        source_ip=extracted['source_ip'] or '0.0.0.0',
+                        source_ip=extracted['source_ip'],
                         **{k: v for k, v in {
                             'destination_ip': extracted.get('destination_ip'),
                             'user_agent': parsed_data.get('user_agent'),
@@ -1100,11 +997,19 @@ class FieldExtractor:
     @staticmethod
     def extract_username(parsed_data: Dict[str, Any]) -> Optional[str]:
         """提取用户名"""
-        username_fields = ["username", "user", "account", "uid", "user_id", "login_user"]
+        username_fields = ["username", "user", "account", "uid", "user_id", "login_user", "remote_user"]
         
         for field in username_fields:
-            if field in parsed_data and parsed_data[field]:
+            if field in parsed_data and parsed_data[field] and parsed_data[field] != '-':
                 return str(parsed_data[field])
+        
+        # 从 message 中提取用户名（syslog 格式）
+        if "message" in parsed_data:
+            message = str(parsed_data["message"])
+            # 匹配 "Accepted password for alice from" 或 "Failed password for bob from"
+            match = re.search(r'(?:Accepted|Failed)\s+(?:password|publickey)\s+for\s+(\w+)\s+from', message)
+            if match:
+                return match.group(1)
         
         return None
     
@@ -1119,6 +1024,13 @@ class FieldExtractor:
         for field in ip_fields:
             if field in parsed_data and parsed_data[field]:
                 return str(parsed_data[field])
+        
+        # 从 message 中提取 IP（syslog 格式）
+        if ip_type == "source" and "message" in parsed_data:
+            message = str(parsed_data["message"])
+            match = re.search(r'from\s+(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})', message)
+            if match:
+                return match.group(1)
         
         return None
     
@@ -1152,7 +1064,6 @@ class FieldExtractor:
             "%Y-%m-%dT%H:%M:%S.%f",
             "%Y-%m-%dT%H:%M:%S.%fZ",
             "%d/%b/%Y:%H:%M:%S %z",
-            "%b %d %H:%M:%S",
         ]
         
         for fmt in formats:
@@ -1161,8 +1072,10 @@ class FieldExtractor:
             except ValueError:
                 continue
         
+        # 处理 syslog 格式（没有年份）： "May 15 12:11:24"
         try:
-            time_with_year = f"{datetime.now().year} {time_str}"
+            current_year = datetime.now().year
+            time_with_year = f"{current_year} {time_str}"
             return datetime.strptime(time_with_year, "%Y %b %d %H:%M:%S")
         except ValueError:
             return None
@@ -1178,10 +1091,12 @@ class FieldExtractor:
         
         if "message" in parsed_data:
             message = str(parsed_data["message"]).upper()
-            if "LOGIN" in message or "登入" in message:
+            if "LOGIN" in message or "登入" in message or "ACCEPTED PASSWORD" in message or "ACCEPTED PUBLICKEY" in message:
                 return "LOGIN"
             elif "LOGOUT" in message or "登出" in message:
                 return "LOGOUT"
+            elif "FAILED PASSWORD" in message or "FAILED PUBLICKEY" in message:
+                return "LOGIN_FAILED"
         
         return None
     
@@ -1276,7 +1191,7 @@ class RegexParser(BaseParser):
                         log_type=self.log_type,
                         username=extracted['username'] or 'unknown',
                         action=extracted['action'] or 'UNKNOWN',
-                        source_ip=extracted['source_ip'] or '0.0.0.0',
+                        source_ip=extracted.get('source_ip'),
                         **{k: v for k, v in {
                             'destination_ip': extracted.get('destination_ip'),
                             'user_agent': parsed_data.get('user_agent'),
@@ -1421,7 +1336,7 @@ class LogparserParser(BaseParser):
                         log_type=pattern_info['log_type'],
                         username=extracted['username'] or 'unknown',
                         action=extracted['action'] or 'UNKNOWN',
-                        source_ip=extracted['source_ip'] or '0.0.0.0',
+                        source_ip=extracted.get('source_ip'),
                         **{k: v for k, v in {
                             'destination_ip': extracted.get('destination_ip'),
                             'user_agent': parsed_data.get('user_agent'),

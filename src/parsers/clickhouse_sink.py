@@ -2,6 +2,8 @@
 ClickHouse 数据输出实现
 实现 DataSink 接口，将结构化日志数据存入 ClickHouse
 """
+import time
+import uuid
 from typing import Any, Dict, List, Optional
 from datetime import datetime
 
@@ -61,7 +63,7 @@ class ClickHouseDataSink(DataSink):
         self.config = config or {}
         self.table = table or self.DEFAULT_TABLE
         self.client: Optional[ClickHouseClient] = None
-        self._id_counter = 0
+        self._id_counter = int(time.time() * 1000)
     
     def connect(self) -> bool:
         """
@@ -144,8 +146,6 @@ class ClickHouseDataSink(DataSink):
             格式化后的日志数据，格式化失败返回 None
         """
         try:
-            self._id_counter += 1
-            
             timestamp = log_data.get('timestamp')
             if isinstance(timestamp, str):
                 try:
@@ -188,7 +188,7 @@ class ClickHouseDataSink(DataSink):
                     response_time = None
             
             formatted = {
-                'id': self._id_counter,
+                'id': self._generate_id(),
                 'timestamp': timestamp,
                 'log_type': log_data.get('log_type', 'application'),
                 'source': log_data.get('source', 'parser'),
@@ -215,6 +215,14 @@ class ClickHouseDataSink(DataSink):
         except Exception as e:
             logger.error(f"格式化日志数据失败: {e}")
             return None
+    
+    def _generate_id(self) -> int:
+        """
+        生成唯一的 UInt64 ID
+        使用毫秒级时间戳 + 计数器确保唯一性
+        """
+        self._id_counter += 1
+        return self._id_counter
     
     def close(self):
         """关闭 ClickHouse 连接"""
