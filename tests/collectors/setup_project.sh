@@ -244,8 +244,11 @@ echo "========== 其他 =========="
 echo "11. 运行所有测试"
 echo "12. 仅显示项目信息"
 echo "13. 退出"
+echo ""
+echo "========== 一键操作 =========="
+echo "14. 一键测试并启动可视化（启动服务+生成日志+运行测试+打开仪表板）"
 
-read -p "请输入选项 (1-13): " choice
+read -p "请输入选项 (1-14): " choice
 
 echo ""
 
@@ -379,8 +382,16 @@ start_docker_services() {
         echo -e "${GREEN}✓ Docker Compose 已安装${NC}"
     fi
     
-    echo "停止并清理旧容器..."
-    $DOCKER_COMPOSE_CMD -f "$COMPOSE_FILE" down -v 2>/dev/null || true
+    echo "检查容器运行状态..."
+    if $DOCKER_COMPOSE_CMD -f "$COMPOSE_FILE" ps 2>/dev/null | grep -q "Up"; then
+        echo -e "${GREEN}✓ 容器已在运行中${NC}"
+        $DOCKER_COMPOSE_CMD -f "$COMPOSE_FILE" ps
+        echo ""
+        echo -e "${BLUE}服务信息:${NC}"
+        echo "  - Kafka: localhost:9092"
+        echo "  - ClickHouse: localhost:8123"
+        return 0
+    fi
     
     echo "启动容器..."
     $DOCKER_COMPOSE_CMD -f "$COMPOSE_FILE" up -d
@@ -561,8 +572,70 @@ case $choice in
     8)
         echo -e "${GREEN}运行完整集成测试...${NC}"
         echo "测试文件: tests/collectors/integration_test_collectors.py"
-        echo "注意: 需要提前启动 Kafka 和 Filebeat"
         echo ""
+        
+        # 检查并启动所有容器化服务
+        echo -e "${YELLOW}[1/3] 检查容器化服务...${NC}"
+        
+        # 检查 Docker Compose 文件是否存在
+        COMPOSE_FILE="$PROJECT_ROOT/tests/collectors/docker-compose-full.yml"
+        if [ ! -f "$COMPOSE_FILE" ]; then
+            echo -e "${RED}❌ 未找到 Docker Compose 文件: $COMPOSE_FILE${NC}"
+            exit 1
+        fi
+        
+        # 检查 Docker 是否可用
+        if ! docker ps &>/dev/null; then
+            if ! sudo docker ps &>/dev/null; then
+                echo -e "${RED}❌ Docker 服务未运行或无法访问${NC}"
+                exit 1
+            fi
+            DOCKER_CMD="sudo docker"
+            DOCKER_COMPOSE_CMD="sudo docker compose"
+        else
+            DOCKER_CMD="docker"
+            DOCKER_COMPOSE_CMD="docker compose"
+        fi
+        
+        # 先启动 Kafka 和 ClickHouse 服务
+        echo "启动 Kafka 和 ClickHouse 服务..."
+        $DOCKER_COMPOSE_CMD -f "$COMPOSE_FILE" up -d kafka clickhouse
+        
+        if [ $? -ne 0 ]; then
+            echo -e "${RED}❌ 启动基础服务失败${NC}"
+            exit 1
+        fi
+        
+        # 等待 Kafka 启动
+        echo "等待 Kafka 服务就绪..."
+        for i in {1..30}; do
+            if $DOCKER_CMD ps --filter "name=kafka-kraft" --filter "status=running" --format "{{.Names}}" | grep -q "kafka-kraft"; then
+                echo -e "${GREEN}✓ Kafka 服务已启动${NC}"
+                break
+            fi
+            if [ $i -eq 30 ]; then
+                echo -e "${RED}❌ Kafka 启动超时${NC}"
+                exit 1
+            fi
+            sleep 2
+        done
+        
+        # 启动 Filebeat 容器
+        echo "启动 Filebeat 容器..."
+        $DOCKER_COMPOSE_CMD -f "$COMPOSE_FILE" up -d filebeat
+        
+        if [ $? -eq 0 ]; then
+            echo -e "${GREEN}✓ Filebeat 容器启动成功${NC}"
+        else
+            echo -e "${RED}❌ Filebeat 容器启动失败${NC}"
+            exit 1
+        fi
+        
+        echo ""
+        echo -e "${GREEN}✅ 环境依赖检查完成${NC}"
+        echo ""
+        
+        # 运行集成测试
         python tests/collectors/integration_test_collectors.py
         ;;
     9)
@@ -609,6 +682,57 @@ case $choice in
     13)
         echo -e "${CYAN}退出脚本${NC}"
         exit 0
+        ;;
+    # ========== 一键操作 ==========
+    14)
+        echo -e "${GREEN}========== 一键测试并启动可视化 ==========${NC}"
+        echo ""
+        
+        # 步骤1: 启动 Kafka + ClickHouse 服务
+        echo -e "${YELLOW}步骤 1/5: 启动 Kafka + ClickHouse 服务...${NC}"
+        echo "----------------------------------------"
+        start_docker_services
+        if [ $? -ne 0 ]; then
+            echo -e "${RED}❌ 服务启动失败，退出${NC}"
+            exit 1
+        fi
+        echo ""
+        
+        # 步骤2: 生成测试日志
+        echo -e "${YELLOW}步骤 2/5: 生成测试日志...${NC}"
+        echo "----------------------------------------"
+        python tests/collectors/simulate_logs.py
+        if [ $? -ne 0 ]; then
+            echo -e "${RED}❌ 日志生成失败，退出${NC}"
+            exit 1
+        fi
+        echo ""
+        
+        # 步骤3: 运行采集器单元测试
+        echo -e "${YELLOW}步骤 3/5: 运行采集器单元测试...${NC}"
+        echo "----------------------------------------"
+        if ! command -v pytest &>/dev/null; then
+            echo -e "${YELLOW}⚠️  pytest 未安装，正在安装...${NC}"
+            pip install pytest -q
+        fi
+        pytest tests/collectors/test_collectors.py -v
+        echo ""
+        
+        # 步骤4: 运行存储模块测试
+        echo -e "${YELLOW}步骤 4/5: 运行存储模块测试...${NC}"
+        echo "----------------------------------------"
+        pytest tests/collectors/storage/storage_test.py -v
+        echo ""
+        
+        # 步骤5: 启动可视化仪表板
+        echo -e "${YELLOW}步骤 5/5: 启动可视化仪表板...${NC}"
+        echo "----------------------------------------"
+        echo -e "${GREEN}🎉 所有测试完成！${NC}"
+        echo ""
+        echo -e "${BLUE}访问地址:${NC} http://localhost:8501"
+        echo -e "${BLUE}按 Ctrl+C 停止${NC}"
+        echo ""
+        streamlit run src/visualization/dashboard.py --server.port 8501 --server.address localhost
         ;;
     *)
         echo -e "${RED}❌ 无效选项${NC}"

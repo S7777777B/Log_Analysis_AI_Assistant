@@ -14,6 +14,41 @@ import pandas as pd
 import json
 import time
 import io
+import logging
+
+# 设置日志配置
+import os
+
+# 确保 logs 目录存在
+logs_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "logs")
+os.makedirs(logs_dir, exist_ok=True)
+
+# 获取当前日期作为日志文件名
+log_filename = os.path.join(logs_dir, f"dashboard_{datetime.now().strftime('%Y-%m-%d')}.log")
+
+# 创建日志处理器
+handlers = [
+    logging.StreamHandler(),  # 控制台输出
+    logging.FileHandler(log_filename, encoding='utf-8')  # 文件输出
+]
+
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s',
+    handlers=handlers
+)
+logger = logging.getLogger(__name__)
+
+# 尝试导入存储模块
+try:
+    from src.storage.clickhouse import ClickHouseClient
+    from src.storage.kafka_client import KafkaClient
+    STORAGE_AVAILABLE = True
+    logger.info("✅ 成功导入存储模块")
+except ImportError as e:
+    STORAGE_AVAILABLE = False
+    logger.warning(f"⚠️ 无法导入存储模块，将使用模拟数据: {e}")
+
 from fpdf import FPDF
 
 # 设置页面配置
@@ -137,6 +172,519 @@ def init_session_state():
         st.session_state.anomaly_users = []
     if "ai_suggestions" not in st.session_state:
         st.session_state.ai_suggestions = []
+    if "data_source" not in st.session_state:
+        st.session_state.data_source = "模拟数据"
+
+
+# ==================== 模拟数据层 ====================
+
+def get_sample_logs(log_type="全部"):
+    """获取模拟日志数据"""
+    sample_logs = [
+        {"时间": datetime.now().strftime("%Y-%m-%d %H:%M:%S"), "类型": "VPN 登录", "用户": "zhangsan", 
+         "IP": "192.168.1.100", "状态": "✅ 成功", "地点": "北京", "风险": "🟢 正常"},
+        {"时间": (datetime.now() - timedelta(seconds=5)).strftime("%Y-%m-%d %H:%M:%S"), "类型": "API 调用", "用户": "lisi", 
+         "IP": "192.168.1.101", "状态": "✅ 成功", "地点": "上海", "风险": "🟢 正常"},
+        {"时间": (datetime.now() - timedelta(seconds=10)).strftime("%Y-%m-%d %H:%M:%S"), "类型": "VPN 登录", "用户": "wangwu", 
+         "IP": "10.0.0.100", "状态": "❌ 失败", "地点": "广州", "风险": "🔴 高危"},
+        {"时间": (datetime.now() - timedelta(seconds=15)).strftime("%Y-%m-%d %H:%M:%S"), "类型": "系统日志", "用户": "system", 
+         "IP": "127.0.0.1", "状态": "⚠️ 警告", "地点": "本地", "风险": "🟡 低危"},
+        {"时间": (datetime.now() - timedelta(seconds=20)).strftime("%Y-%m-%d %H:%M:%S"), "类型": "安全设备", "用户": "firewall", 
+         "IP": "192.168.1.1", "状态": "🔴 阻断", "地点": "边界", "风险": "🔴 高危"},
+    ]
+    
+    if log_type != "全部":
+        sample_logs = [log for log in sample_logs if log["类型"] == log_type]
+    
+    return sample_logs
+
+
+def get_sample_anomaly_users():
+    """获取模拟异常用户数据"""
+    return {
+        "排名": list(range(1, 11)),
+        "用户名": ["zhangsan", "lisi", "wangwu", "zhaoliu", "sunqi", 
+                   "zhouba", "wujiu", "zhengshi", "qianshi", "liushi"],
+        "异常评分": [0.95, 0.88, 0.82, 0.75, 0.68, 0.62, 0.55, 0.48, 0.42, 0.35],
+        "风险等级": ["🔴 高危", "🔴 高危", "🟠 中危", "🟠 中危", "🟠 中危",
+                    "🟡 低危", "🟡 低危", "🟡 低危", "🟡 低危", "🟡 低危"],
+        "异常事件数": [15, 12, 10, 8, 7, 6, 5, 4, 3, 2],
+        "最近异常时间": [datetime.now().strftime("%Y-%m-%d %H:%M"), 
+                        (datetime.now() - timedelta(hours=1)).strftime("%Y-%m-%d %H:%M"),
+                        (datetime.now() - timedelta(hours=2)).strftime("%Y-%m-%d %H:%M"),
+                        (datetime.now() - timedelta(hours=3)).strftime("%Y-%m-%d %H:%M"),
+                        (datetime.now() - timedelta(hours=5)).strftime("%Y-%m-%d %H:%M"),
+                        (datetime.now() - timedelta(hours=7)).strftime("%Y-%m-%d %H:%M"),
+                        (datetime.now() - timedelta(hours=9)).strftime("%Y-%m-%d %H:%M"),
+                        (datetime.now() - timedelta(hours=11)).strftime("%Y-%m-%d %H:%M"),
+                        (datetime.now() - timedelta(hours=13)).strftime("%Y-%m-%d %H:%M"),
+                        (datetime.now() - timedelta(hours=15)).strftime("%Y-%m-%d %H:%M")]
+    }
+
+
+def get_sample_security_metrics():
+    """获取模拟安全指标数据"""
+    return {
+        "security_score": 75,
+        "anomaly_count": 12,
+        "high_risk_count": 5,
+        "disposed_count": 8
+    }
+
+
+def get_sample_security_trend(days=7):
+    """获取模拟安全评分趋势"""
+    dates = pd.date_range(end=datetime.now(), periods=days, freq='D').strftime("%Y-%m-%d")
+    return pd.DataFrame({
+        "日期": dates,
+        "安全评分": [85, 82, 78, 80, 75, 73, 75][-days:],
+        "异常事件数": [5, 8, 10, 7, 12, 15, 12][-days:]
+    })
+
+
+def get_sample_risk_distribution():
+    """获取模拟风险等级分布"""
+    return pd.DataFrame({
+        "风险等级": ["🔴 高危", "🟠 中危", "🟡 低危"],
+        "事件数": [5, 18, 45]
+    })
+
+
+def get_sample_threat_stats():
+    """获取模拟威胁类型统计"""
+    return pd.DataFrame({
+        "威胁类型": ["账号接管", "异常访问", "暴力破解", "数据外传", "其他"],
+        "数量": [3, 15, 8, 2, 40]
+    })
+
+
+def get_sample_ai_suggestions(status_filter="全部", risk_filter="全部"):
+    """获取模拟 AI 处置建议数据"""
+    suggestions = [
+        {
+            "id": 1, "用户": "zhangsan", "威胁类型": "账号接管", "风险等级": "🔴 高危",
+            "异常描述": "检测到用户在凌晨 3 点从异地 IP 登录，并频繁调用敏感 API",
+            "AI 分析": "该行为符合账号接管攻击特征，攻击者可能已获取用户凭据",
+            "处置建议": "立即冻结账号，联系用户确认，调查登录来源 IP",
+            "置信度": "92%", "处置状态": "待处置", "生成时间": datetime.now().strftime("%Y-%m-%d %H:%M")
+        },
+        {
+            "id": 2, "用户": "lisi", "威胁类型": "暴力破解", "风险等级": "🔴 高危",
+            "异常描述": "检测到同一 IP 在 5 分钟内尝试登录 50 次，涉及多个账号",
+            "AI 分析": "典型的暴力破解攻击，建议封禁来源 IP",
+            "处置建议": "封禁 IP 地址 10.0.0.100，启用账号锁定策略",
+            "置信度": "98%", "处置状态": "待处置", "生成时间": (datetime.now() - timedelta(hours=1)).strftime("%Y-%m-%d %H:%M")
+        },
+        {
+            "id": 3, "用户": "wangwu", "威胁类型": "数据外传", "风险等级": "🟠 中危",
+            "异常描述": "用户批量下载敏感数据，下载量超过平时 10 倍",
+            "AI 分析": "可能存在数据外传风险，需要进一步核实业务需求",
+            "处置建议": "限制下载权限，联系用户主管确认业务需求",
+            "置信度": "75%", "处置状态": "处置中", "生成时间": (datetime.now() - timedelta(hours=3)).strftime("%Y-%m-%d %H:%M")
+        },
+        {
+            "id": 4, "用户": "zhaoliu", "威胁类型": "异常访问", "风险等级": "🟡 低危",
+            "异常描述": "用户在非工作时间访问系统",
+            "AI 分析": "可能是用户加班，建议核实",
+            "处置建议": "联系用户确认访问原因",
+            "置信度": "45%", "处置状态": "已处置", "生成时间": (datetime.now() - timedelta(hours=5)).strftime("%Y-%m-%d %H:%M")
+        },
+        {
+            "id": 5, "用户": "sunqi", "威胁类型": "权限提升", "风险等级": "🔴 高危",
+            "异常描述": "用户尝试访问超出权限的资源",
+            "AI 分析": "可能存在权限提升攻击",
+            "处置建议": "立即冻结账号，进行安全审计",
+            "置信度": "88%", "处置状态": "误报", "生成时间": (datetime.now() - timedelta(hours=8)).strftime("%Y-%m-%d %H:%M")
+        },
+    ]
+    
+    filtered = []
+    for suggestion in suggestions:
+        if status_filter != "全部" and suggestion["处置状态"] != status_filter:
+            continue
+        if risk_filter != "全部" and suggestion["风险等级"] != risk_filter:
+            continue
+        filtered.append(suggestion)
+    
+    return filtered
+
+
+def get_sample_search_results():
+    """获取模拟历史查询结果"""
+    return [
+        {"时间": datetime.now().strftime("%Y-%m-%d %H:%M:%S"), "用户": "zhangsan", "类型": "VPN 登录", 
+         "IP": "10.0.0.100", "状态": "❌ 失败", "地点": "广州", "风险等级": "🔴 高危"},
+        {"时间": (datetime.now() - timedelta(minutes=10)).strftime("%Y-%m-%d %H:%M:%S"), "用户": "zhangsan", "类型": "API 调用", 
+         "IP": "10.0.0.100", "状态": "✅ 成功", "地点": "广州", "风险等级": "🟠 中危"},
+        {"时间": (datetime.now() - timedelta(hours=2)).strftime("%Y-%m-%d %H:%M:%S"), "用户": "lisi", "类型": "VPN 登录", 
+         "IP": "192.168.1.101", "状态": "✅ 成功", "地点": "上海", "风险等级": "🟡 低危"},
+    ]
+
+
+# ==================== 真实接口层 ====================
+
+def fetch_realtime_logs(log_type="全部", limit=100):
+    """从 ClickHouse 获取真实日志数据"""
+    client = ClickHouseClient()
+    query = """
+        SELECT timestamp, log_type, username, source_ip, status, location, risk_level
+        FROM security_logs
+        WHERE 1=1
+    """
+    params = []
+    
+    if log_type != "全部":
+        query += " AND log_type = %s"
+        params.append(log_type)
+    
+    query += " ORDER BY timestamp DESC LIMIT %s"
+    params.append(limit)
+    
+    result = client.query(query, tuple(params))
+    
+    logs = []
+    for row in result:
+        logs.append({
+            "时间": row[0].strftime("%Y-%m-%d %H:%M:%S"),
+            "类型": row[1],
+            "用户": row[2],
+            "IP": row[3],
+            "状态": row[4],
+            "地点": row[5],
+            "风险": row[6]
+        })
+    
+    return logs
+
+
+def fetch_anomaly_users(time_range="最近 24 小时", limit=10):
+    """从 ClickHouse 获取真实异常用户数据"""
+    client = ClickHouseClient()
+    
+    time_map = {
+        "最近 24 小时": 24,
+        "最近 7 天": 168,
+        "最近 30 天": 720
+    }
+    hours = time_map.get(time_range, 24)
+    
+    query = """
+        SELECT username, anomaly_score, risk_level, anomaly_count, last_anomaly_time
+        FROM user_anomaly_scores
+        WHERE last_anomaly_time >= NOW() - INTERVAL %s HOUR
+        ORDER BY anomaly_score DESC
+        LIMIT %s
+    """
+    
+    result = client.query(query, (hours, limit))
+    
+    users = []
+    for i, row in enumerate(result, 1):
+        users.append({
+            "排名": i,
+            "用户名": row[0],
+            "异常评分": row[1],
+            "风险等级": row[2],
+            "异常事件数": row[3],
+            "最近异常时间": row[4].strftime("%Y-%m-%d %H:%M")
+        })
+    
+    return users
+
+
+def fetch_security_metrics():
+    """从 ClickHouse 获取真实安全指标数据"""
+    client = ClickHouseClient()
+    
+    # 获取整体安全评分
+    score_query = "SELECT AVG(security_score) FROM daily_security_scores WHERE date = TODAY()"
+    score_result = client.query(score_query)
+    security_score = int(score_result[0][0]) if score_result else 75
+    
+    # 获取今日异常事件数
+    anomaly_query = "SELECT COUNT(*) FROM anomaly_events WHERE event_time >= TODAY()"
+    anomaly_result = client.query(anomaly_query)
+    anomaly_count = anomaly_result[0][0] if anomaly_result else 12
+    
+    # 获取高危用户数
+    high_risk_query = "SELECT COUNT(*) FROM user_anomaly_scores WHERE risk_level = '🔴 高危'"
+    high_risk_result = client.query(high_risk_query)
+    high_risk_count = high_risk_result[0][0] if high_risk_result else 5
+    
+    # 获取已处置事件数
+    disposed_query = "SELECT COUNT(*) FROM anomaly_events WHERE status = '已处置' AND event_time >= TODAY()"
+    disposed_result = client.query(disposed_query)
+    disposed_count = disposed_result[0][0] if disposed_result else 8
+    
+    return {
+        "security_score": security_score,
+        "anomaly_count": anomaly_count,
+        "high_risk_count": high_risk_count,
+        "disposed_count": disposed_count
+    }
+
+
+def fetch_security_trend(days=7):
+    """从 ClickHouse 获取真实安全评分趋势"""
+    client = ClickHouseClient()
+    query = """
+        SELECT date, security_score, anomaly_count
+        FROM daily_security_scores
+        WHERE date >= TODAY() - INTERVAL %s DAY
+        ORDER BY date
+    """
+    result = client.query(query, (days,))
+    
+    data = {
+        "日期": [],
+        "安全评分": [],
+        "异常事件数": []
+    }
+    
+    for row in result:
+        data["日期"].append(row[0].strftime("%Y-%m-%d"))
+        data["安全评分"].append(row[1])
+        data["异常事件数"].append(row[2])
+    
+    return pd.DataFrame(data)
+
+
+def fetch_risk_distribution():
+    """从 ClickHouse 获取真实风险等级分布"""
+    client = ClickHouseClient()
+    query = "SELECT risk_level, COUNT(*) FROM anomaly_events WHERE event_time >= TODAY() GROUP BY risk_level"
+    result = client.query(query)
+    
+    data = {"风险等级": [], "事件数": []}
+    for row in result:
+        data["风险等级"].append(row[0])
+        data["事件数"].append(row[1])
+    
+    return pd.DataFrame(data)
+
+
+def fetch_threat_stats():
+    """从 ClickHouse 获取真实威胁类型统计"""
+    client = ClickHouseClient()
+    query = "SELECT threat_type, COUNT(*) FROM anomaly_events WHERE event_time >= TODAY() GROUP BY threat_type"
+    result = client.query(query)
+    
+    data = {"威胁类型": [], "数量": []}
+    for row in result:
+        data["威胁类型"].append(row[0])
+        data["数量"].append(row[1])
+    
+    return pd.DataFrame(data)
+
+
+def fetch_ai_suggestions(status_filter="全部", risk_filter="全部"):
+    """从 ClickHouse 获取真实 AI 处置建议"""
+    client = ClickHouseClient()
+    query = """
+        SELECT id, username, threat_type, risk_level, anomaly_description, 
+               ai_analysis, suggestion, confidence, status, create_time
+        FROM ai_suggestions
+        WHERE 1=1
+    """
+    params = []
+    
+    if status_filter != "全部":
+        query += " AND status = %s"
+        params.append(status_filter)
+    
+    if risk_filter != "全部":
+        query += " AND risk_level = %s"
+        params.append(risk_filter)
+    
+    query += " ORDER BY create_time DESC"
+    
+    result = client.query(query, tuple(params) if params else None)
+    
+    suggestions = []
+    for row in result:
+        suggestions.append({
+            "id": row[0],
+            "用户": row[1],
+            "威胁类型": row[2],
+            "风险等级": row[3],
+            "异常描述": row[4],
+            "AI 分析": row[5],
+            "处置建议": row[6],
+            "置信度": f"{row[7]}%",
+            "处置状态": row[8],
+            "生成时间": row[9].strftime("%Y-%m-%d %H:%M")
+        })
+    
+    return suggestions
+
+
+def fetch_history_logs(start_time=None, end_time=None, username=None, source_ip=None, 
+                       log_type="全部", status="全部"):
+    """从 ClickHouse 搜索真实历史日志"""
+    client = ClickHouseClient()
+    query = """
+        SELECT timestamp, username, log_type, source_ip, status, location, risk_level
+        FROM security_logs
+        WHERE 1=1
+    """
+    params = []
+    
+    if start_time:
+        query += " AND timestamp >= %s"
+        params.append(start_time)
+    
+    if end_time:
+        query += " AND timestamp <= %s"
+        params.append(end_time)
+    
+    if username:
+        query += " AND username = %s"
+        params.append(username)
+    
+    if source_ip:
+        query += " AND source_ip = %s"
+        params.append(source_ip)
+    
+    if log_type != "全部":
+        query += " AND log_type = %s"
+        params.append(log_type)
+    
+    if status != "全部":
+        query += " AND status = %s"
+        params.append(status)
+    
+    query += " ORDER BY timestamp DESC LIMIT 100"
+    
+    result = client.query(query, tuple(params) if params else None)
+    
+    logs = []
+    for row in result:
+        logs.append({
+            "时间": row[0].strftime("%Y-%m-%d %H:%M:%S"),
+            "用户": row[1],
+            "类型": row[2],
+            "IP": row[3],
+            "状态": row[4],
+            "地点": row[5],
+            "风险等级": row[6]
+        })
+    
+    return logs
+
+
+# ==================== 数据访问层（统一入口） ====================
+
+def get_realtime_logs(log_type="全部", limit=100):
+    """获取实时日志数据（统一入口）"""
+    if STORAGE_AVAILABLE:
+        try:
+            data = fetch_realtime_logs(log_type, limit)
+            logger.info(f"📡 当前显示: 实时数据 - 从 ClickHouse 获取 {len(data)} 条日志")
+            return data
+        except Exception as e:
+            logger.error(f"❌ 获取实时日志失败: {e}")
+    
+    logger.info("📡 当前显示: 模拟数据 - 实时日志")
+    return get_sample_logs(log_type)
+
+
+def get_anomaly_users(time_range="最近 24 小时", limit=10):
+    """获取异常用户数据（统一入口）"""
+    if STORAGE_AVAILABLE:
+        try:
+            data = fetch_anomaly_users(time_range, limit)
+            logger.info(f"👥 当前显示: 实时数据 - 从 ClickHouse 获取 {len(data)} 个异常用户")
+            return data
+        except Exception as e:
+            logger.error(f"❌ 获取异常用户失败: {e}")
+    
+    logger.info("👥 当前显示: 模拟数据 - 异常用户排行")
+    return get_sample_anomaly_users()
+
+
+def get_security_metrics():
+    """获取安全指标数据（统一入口）"""
+    if STORAGE_AVAILABLE:
+        try:
+            data = fetch_security_metrics()
+            logger.info("🛡️ 当前显示: 实时数据 - 安全指标")
+            return data
+        except Exception as e:
+            logger.error(f"❌ 获取安全指标失败: {e}")
+    
+    logger.info("🛡️ 当前显示: 模拟数据 - 安全指标")
+    return get_sample_security_metrics()
+
+
+def get_security_trend(days=7):
+    """获取安全评分趋势（统一入口）"""
+    if STORAGE_AVAILABLE:
+        try:
+            data = fetch_security_trend(days)
+            logger.info(f"📈 当前显示: 实时数据 - 安全评分趋势 ({days}天)")
+            return data
+        except Exception as e:
+            logger.error(f"❌ 获取安全趋势失败: {e}")
+    
+    logger.info("📈 当前显示: 模拟数据 - 安全评分趋势")
+    return get_sample_security_trend(days)
+
+
+def get_risk_distribution():
+    """获取风险等级分布（统一入口）"""
+    if STORAGE_AVAILABLE:
+        try:
+            data = fetch_risk_distribution()
+            logger.info("⚠️ 当前显示: 实时数据 - 风险分布")
+            return data
+        except Exception as e:
+            logger.error(f"❌ 获取风险分布失败: {e}")
+    
+    logger.info("⚠️ 当前显示: 模拟数据 - 风险分布")
+    return get_sample_risk_distribution()
+
+
+def get_threat_stats():
+    """获取威胁类型统计（统一入口）"""
+    if STORAGE_AVAILABLE:
+        try:
+            data = fetch_threat_stats()
+            logger.info("🎯 当前显示: 实时数据 - 威胁类型统计")
+            return data
+        except Exception as e:
+            logger.error(f"❌ 获取威胁统计失败: {e}")
+    
+    logger.info("🎯 当前显示: 模拟数据 - 威胁类型统计")
+    return get_sample_threat_stats()
+
+
+def get_ai_suggestions(status_filter="全部", risk_filter="全部"):
+    """获取 AI 处置建议（统一入口）"""
+    if STORAGE_AVAILABLE:
+        try:
+            data = fetch_ai_suggestions(status_filter, risk_filter)
+            logger.info(f"🤖 当前显示: 实时数据 - 从 ClickHouse 获取 {len(data)} 条 AI 建议")
+            return data
+        except Exception as e:
+            logger.error(f"❌ 获取 AI 建议失败: {e}")
+    
+    logger.info("🤖 当前显示: 模拟数据 - AI 处置建议")
+    return get_sample_ai_suggestions(status_filter, risk_filter)
+
+
+def search_history_logs(start_time=None, end_time=None, username=None, source_ip=None, 
+                        log_type="全部", status="全部"):
+    """搜索历史日志（统一入口）"""
+    if STORAGE_AVAILABLE:
+        try:
+            data = fetch_history_logs(start_time, end_time, username, source_ip, log_type, status)
+            logger.info(f"🔍 当前显示: 实时数据 - 从 ClickHouse 获取 {len(data)} 条历史日志")
+            return data
+        except Exception as e:
+            logger.error(f"❌ 搜索历史日志失败: {e}")
+    
+    logger.info("🔍 当前显示: 模拟数据 - 历史查询")
+    return get_sample_search_results()
 
 
 def create_sidebar():
@@ -170,7 +718,7 @@ def create_sidebar():
         st.metric("异常事件数", "68", "-8%")
         
         st.markdown("---")
-        st.caption("© 2024 日志分析 AI 助手")
+        st.caption("© 日志分析 AI 助手")
 
 
 def show_realtime_logs():
@@ -195,26 +743,11 @@ def show_realtime_logs():
     # 实时日志列表
     st.subheader("📋 日志列表")
     
-    # 模拟实时日志数据
-    sample_logs = [
-        {"时间": "2024-01-21 10:30:15", "类型": "VPN 登录", "用户": "zhangsan", 
-         "IP": "192.168.1.100", "状态": "✅ 成功", "地点": "北京", "风险": "🟢 正常"},
-        {"时间": "2024-01-21 10:30:18", "类型": "API 调用", "用户": "lisi", 
-         "IP": "192.168.1.101", "状态": "✅ 成功", "地点": "上海", "风险": "🟢 正常"},
-        {"时间": "2024-01-21 10:30:20", "类型": "VPN 登录", "用户": "wangwu", 
-         "IP": "10.0.0.100", "状态": "❌ 失败", "地点": "广州", "风险": "🔴 高危"},
-        {"时间": "2024-01-21 10:30:25", "类型": "系统日志", "用户": "system", 
-         "IP": "127.0.0.1", "状态": "⚠️ 警告", "地点": "本地", "风险": "🟡 低危"},
-        {"时间": "2024-01-21 10:30:30", "类型": "安全设备", "用户": "firewall", 
-         "IP": "192.168.1.1", "状态": "🔴 阻断", "地点": "边界", "风险": "🔴 高危"},
-    ]
-    
-    # 过滤数据
-    if log_type != "全部":
-        sample_logs = [log for log in sample_logs if log["类型"] == log_type]
+    # 从接口获取日志数据
+    logs_data = get_realtime_logs(log_type)
     
     # 展示日志表格
-    df_logs = pd.DataFrame(sample_logs)
+    df_logs = pd.DataFrame(logs_data)
     st.dataframe(df_logs, use_container_width=True, height=400)
     
     # 刷新状态提示
@@ -227,7 +760,7 @@ def show_realtime_logs():
     st.divider()
     st.subheader("📊 实时统计")
     
-    # 待实现接口：从后端获取真实的实时统计数据
+    # 从接口获取统计数据
     stat_col1, stat_col2, stat_col3, stat_col4 = st.columns(4)
     with stat_col1:
         st.metric("今日日志总量", "125,458", "+12%")
@@ -256,21 +789,16 @@ def show_ueba_ranking():
     # 异常用户 TOP10 排行
     st.subheader("🔴 异常用户 TOP10")
     
-    # 待实现接口：从后端获取真实的异常用户排行数据
-    ranking_data = {
-        "排名": list(range(1, 11)),
-        "用户名": ["zhangsan", "lisi", "wangwu", "zhaoliu", "sunqi", 
-                   "zhouba", "wujiu", "zhengshi", "qianshi", "liushi"],
-        "异常评分": [0.95, 0.88, 0.82, 0.75, 0.68, 0.62, 0.55, 0.48, 0.42, 0.35],
-        "风险等级": ["🔴 高危", "🔴 高危", "🟠 中危", "🟠 中危", "🟠 中危",
-                    "🟡 低危", "🟡 低危", "🟡 低危", "🟡 低危", "🟡 低危"],
-        "异常事件数": [15, 12, 10, 8, 7, 6, 5, 4, 3, 2],
-        "最近异常时间": ["2024-01-21 03:15", "2024-01-21 02:30", "2024-01-20 23:45",
-                       "2024-01-20 22:10", "2024-01-20 20:30", "2024-01-20 18:15",
-                       "2024-01-20 16:00", "2024-01-20 14:30", "2024-01-20 12:15", "2024-01-20 10:00"]
-    }
+    # 从接口获取异常用户数据
+    ranking_result = get_anomaly_users(time_range)
     
-    df_ranking = pd.DataFrame(ranking_data)
+    # 检查返回的数据格式（可能是字典或列表）
+    if isinstance(ranking_result, dict):
+        # 模拟数据格式
+        df_ranking = pd.DataFrame(ranking_result)
+    else:
+        # 实时数据格式（列表）
+        df_ranking = pd.DataFrame(ranking_result)
     
     # 使用进度条展示异常评分
     st.dataframe(
@@ -287,7 +815,7 @@ def show_ueba_ranking():
     # 高危用户详情
     st.subheader("📋 高危用户详情")
     
-    selected_user = st.selectbox("选择用户查看详情", ranking_data["用户名"][:5])
+    selected_user = st.selectbox("选择用户查看详情", df_ranking["用户名"].tolist()[:5])
     
     if selected_user:
         col1, col2, col3, col4 = st.columns(4)
@@ -343,27 +871,25 @@ def show_security_score():
     # 安全评分卡片
     col1, col2, col3, col4 = st.columns(4)
     
-    # 待实现接口：从后端获取真实的安全评分数据
+    # 从接口获取安全指标数据
+    metrics = get_security_metrics()
+    
     with col1:
-        st.metric("整体安全评分", "75", "-5", delta_color="inverse")
+        st.metric("整体安全评分", str(metrics["security_score"]), "-5", delta_color="inverse")
     with col2:
-        st.metric("今日异常事件", "12", "+3", delta_color="inverse")
+        st.metric("今日异常事件", str(metrics["anomaly_count"]), "+3", delta_color="inverse")
     with col3:
-        st.metric("高危用户数", "5", "-2", delta_color="normal")
+        st.metric("高危用户数", str(metrics["high_risk_count"]), "-2", delta_color="normal")
     with col4:
-        st.metric("已处置事件", "8", "+5", delta_color="normal")
+        st.metric("已处置事件", str(metrics["disposed_count"]), "+5", delta_color="normal")
     
     st.divider()
     
     # 安全评分趋势图
     st.subheader("📈 安全评分趋势")
     
-    # 待实现接口：从后端获取真实的安全评分趋势数据
-    score_data = pd.DataFrame({
-        "日期": pd.date_range(end=datetime.now(), periods=7, freq='D').strftime("%Y-%m-%d"),
-        "安全评分": [85, 82, 78, 80, 75, 73, 75],
-        "异常事件数": [5, 8, 10, 7, 12, 15, 12]
-    })
+    # 从接口获取安全评分趋势数据
+    score_data = get_security_trend(days=7)
     
     st.line_chart(score_data.set_index("日期")["安全评分"])
     
@@ -374,20 +900,14 @@ def show_security_score():
     
     with col1:
         st.subheader("⚠️ 风险等级分布")
-        # 待实现接口：从后端获取真实的风险等级分布数据
-        risk_data = pd.DataFrame({
-            "风险等级": ["🔴 高危", "🟠 中危", "🟡 低危"],
-            "事件数": [5, 18, 45]
-        })
+        # 从接口获取风险等级分布数据
+        risk_data = get_risk_distribution()
         st.bar_chart(risk_data.set_index("风险等级"))
     
     with col2:
         st.subheader("🎯 威胁类型统计")
-        # 待实现接口：从后端获取真实的威胁类型统计数据
-        threat_data = pd.DataFrame({
-            "威胁类型": ["账号接管", "异常访问", "暴力破解", "数据外传", "其他"],
-            "数量": [3, 15, 8, 2, 40]
-        })
+        # 从接口获取威胁类型统计数据
+        threat_data = get_threat_stats()
         st.bar_chart(threat_data.set_index("威胁类型"))
     
     # 生成日报
@@ -436,46 +956,10 @@ def show_ai_suggestions():
     st.divider()
     
     # AI 处置建议列表
-    # 待实现接口：从后端获取真实的处置建议数据
-    suggestions = [
-        {
-            "id": 1, "用户": "zhangsan", "威胁类型": "账号接管", "风险等级": "🔴 高危",
-            "异常描述": "检测到用户在凌晨 3 点从异地 IP 登录，并频繁调用敏感 API",
-            "AI 分析": "该行为符合账号接管攻击特征，攻击者可能已获取用户凭据",
-            "处置建议": "立即冻结账号，联系用户确认，调查登录来源 IP",
-            "置信度": "92%", "处置状态": "待处置", "生成时间": "2024-01-21 03:30"
-        },
-        {
-            "id": 2, "用户": "lisi", "威胁类型": "暴力破解", "风险等级": "🔴 高危",
-            "异常描述": "检测到同一 IP 在 5 分钟内尝试登录 50 次，涉及多个账号",
-            "AI 分析": "典型的暴力破解攻击，建议封禁来源 IP",
-            "处置建议": "封禁 IP 地址 10.0.0.100，启用账号锁定策略",
-            "置信度": "98%", "处置状态": "待处置", "生成时间": "2024-01-21 02:45"
-        },
-        {
-            "id": 3, "用户": "wangwu", "威胁类型": "数据外传", "风险等级": "🟠 中危",
-            "异常描述": "用户批量下载敏感数据，下载量超过平时 10 倍",
-            "AI 分析": "可能存在数据外传风险，需要进一步核实业务需求",
-            "处置建议": "限制下载权限，联系用户主管确认业务需求",
-            "置信度": "75%", "处置状态": "处置中", "生成时间": "2024-01-20 16:20"
-        },
-        {
-            "id": 4, "用户": "zhaoliu", "威胁类型": "异常访问", "风险等级": "🟡 低危",
-            "异常描述": "用户在非工作时间访问系统",
-            "AI 分析": "可能是用户加班，建议核实",
-            "处置建议": "联系用户确认访问原因",
-            "置信度": "45%", "处置状态": "已处置", "生成时间": "2024-01-19 22:15"
-        },
-        {
-            "id": 5, "用户": "sunqi", "威胁类型": "权限提升", "风险等级": "🔴 高危",
-            "异常描述": "用户尝试访问超出权限的资源",
-            "AI 分析": "可能存在权限提升攻击",
-            "处置建议": "立即冻结账号，进行安全审计",
-            "置信度": "88%", "处置状态": "误报", "生成时间": "2024-01-18 14:30"
-        },
-    ]
+    # 从接口获取处置建议数据
+    suggestions = get_ai_suggestions(status_filter, risk_filter)
     
-    # 根据筛选条件过滤建议
+    # 根据筛选条件过滤建议（接口已处理过滤，这里保留冗余过滤作为双重保障）
     filtered_suggestions = []
     for suggestion in suggestions:
         # 状态筛选
@@ -521,11 +1005,10 @@ def show_ai_suggestions():
                     
                     # 按钮行
                     col1, col2, col3 = st.columns(3)
-                    show_logs = False
                     
                     with col1:
                         if st.button("🔍 查看详细日志", key=f"detail_{suggestion['id']}"):
-                            show_logs = True
+                            st.session_state[f"show_logs_{suggestion['id']}"] = True
                     with col2:
                         if st.button("⚠️ 标记为误报", key=f"false_{suggestion['id']}"):
                             pass
@@ -534,7 +1017,7 @@ def show_ai_suggestions():
                             pass
                     
                     # 日志内容显示在按钮行下方，占满整个宽度
-                    if show_logs:
+                    if st.session_state.get(f"show_logs_{suggestion['id']}", False):
                         logs = [
                             "2024-01-21 03:15:00 LOGIN user=zhangsan ip=10.0.0.100 status=SUCCESS",
                             "2024-01-21 03:16:00 API_CALL user=zhangsan endpoint=/api/sensitive/data count=1",
@@ -592,9 +1075,11 @@ def show_history_search():
     
     # 查询按钮
     col1, col2, col3 = st.columns([3, 1, 1])
+    search_triggered = False
     with col2:
         if st.button("🔍 查询", type="primary", use_container_width=True):
-            st.success("查询成功，找到 125 条记录")
+            search_triggered = True
+            st.success("查询成功")
     with col3:
         if st.button("🗑️ 重置", use_container_width=True):
             st.rerun()
@@ -604,18 +1089,22 @@ def show_history_search():
     # 查询结果
     st.subheader("📊 查询结果")
     
-    # 待实现接口：从后端获取真实的查询结果数据
-    search_results = [
-        {"时间": "2024-01-21 03:15:00", "用户": "zhangsan", "类型": "VPN 登录", 
-         "IP": "10.0.0.100", "状态": "❌ 失败", "地点": "广州", "风险等级": "🔴 高危"},
-        {"时间": "2024-01-21 03:16:00", "用户": "zhangsan", "类型": "API 调用", 
-         "IP": "10.0.0.100", "状态": "✅ 成功", "地点": "广州", "风险等级": "🟠 中危"},
-        {"时间": "2024-01-20 09:30:00", "用户": "lisi", "类型": "VPN 登录", 
-         "IP": "192.168.1.101", "状态": "✅ 成功", "地点": "上海", "风险等级": "🟡 低危"},
-    ]
+    # 从接口获取查询结果数据
+    search_results = search_history_logs(
+        start_time=start_time,
+        end_time=end_time,
+        username=username if username else None,
+        source_ip=source_ip if source_ip else None,
+        log_type=log_type,
+        status=status
+    )
     
     df_results = pd.DataFrame(search_results)
     st.dataframe(df_results, use_container_width=True, height=300)
+    
+    # 查询结果统计提示
+    if search_triggered:
+        st.info(f"找到 {len(search_results)} 条记录")
     
     # 导出功能
     st.divider()

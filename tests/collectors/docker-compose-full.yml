@@ -18,10 +18,11 @@ services:
     ports:
       - "9092:9092"
     healthcheck:
-      test: ["CMD", "kafka-broker-api-versions", "--bootstrap-server", "localhost:9092"]
+      test: ["CMD-SHELL", "nc -z localhost 9092 || exit 1"]
       interval: 5s
       timeout: 10s
-      retries: 10
+      retries: 20
+      start_period: 30s
 
   # ClickHouse 服务
   clickhouse:
@@ -65,6 +66,25 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+
+  # Filebeat 服务
+  filebeat:
+    image: docker.elastic.co/beats/filebeat:8.13.0
+    container_name: filebeat
+    user: root
+    volumes:
+      - /var/log:/var/log:ro
+      - ./sample_logs:/logs/sample:ro
+      - ./filebeat-config.yml:/usr/share/filebeat/filebeat.yml:ro
+      - ./../../logs/filebeat:/var/log/filebeat
+    depends_on:
+      kafka:
+        condition: service_healthy
+    environment:
+      - KAFKA_HOST=kafka:9092
+    restart: unless-stopped
+    networks:
+      - default
 
 volumes:
   clickhouse-data:

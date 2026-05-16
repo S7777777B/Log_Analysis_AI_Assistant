@@ -1,3 +1,4 @@
+# streamlit 前端
 streamlit==1.56.0
 fpdf==1.7.2
 
@@ -6,14 +7,13 @@ pydantic>=2.5.0,<3.0.0
 pydantic-settings>=2.1.0,<3.0.0
 python-dateutil>=2.8.2,<3.0.0
 PyYAML>=6.0.2,<7.0.0
+
 # 日志处理 (docker 4.2 $ filebeat 8.19.13另外安装)
 pydantic_settings
 kafka-python==2.3.0
 clickhouse-connect>=0.7.0    # ClickHouse 客户端驱动
 elasticsearch>=8.0.0         # Elasticsearch 客户端（可选，如不使用可注释）
-# Behavior 模块运行依赖
-python-dotenv==1.0.0
-python-dateutil==2.8.2
 
-# Behavior 模块测试依赖
-pytest==7.4.3
+# AI API
+openai>=1.0.0
+python-dotenv>=1.0.0
