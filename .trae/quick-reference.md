@@ -234,6 +234,7 @@ except Exception as e:
 ## 数据类型速查
 
 <<<<<<< HEAD
+<<<<<<< HEAD
 ### 日志数据结构（标准格式）
 ```python
 # JSON 解析器输出示例
@@ -317,6 +318,8 @@ processed_record = {
     "parse_status": "success",
     "severity_level": "INFO"
 =======
+=======
+>>>>>>> origin/feature-behavior
 ### 日志数据结构
 ```python
 log_record = {
@@ -330,7 +333,10 @@ log_record = {
     "raw_log": "原始日志内容",
     "parser": "regex",
     "parse_status": "success"
+<<<<<<< HEAD
 >>>>>>> origin/feature-storage
+=======
+>>>>>>> origin/feature-behavior
 }
 ```
 
@@ -572,8 +578,11 @@ streamlit run dashboard.py --server.port 8502
 
 **提示**: 将此文件放在手边，开发时快速查阅！
 <<<<<<< HEAD
+<<<<<<< HEAD
 =======
 
 **更新日期**: 2026-04-29
 **当前状态**: 数据存储模块（Kafka + ClickHouse）测试通过
 >>>>>>> origin/feature-storage
+=======
+>>>>>>> origin/feature-behavior
