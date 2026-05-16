@@ -33,19 +33,21 @@
 ### P0 - 核心功能（必须实现）
 
 1. ✅ **项目框架** - 已完成模板状态
-2. 🔲 **日志解析器** - 实现正则和 JSON 解析器的完整逻辑
+2. ✅ **日志解析器** - 实现正则和 JSON 解析器的完整逻辑（测试通过）
 3. ✅ **Kafka 客户端** - 实现消息的发送和消费（测试通过）
 4. ✅ **ClickHouse 客户端** - 实现数据插入和查询（测试通过）
-5. 🔲 **用户画像** - 实现用户行为特征提取
-6. 🔲 **异常检测** - 实现基于统计的异常检测
-7. 🔲 **AI 分析器** - 集成大模型 API
+5. ✅ **日志采集器** - Filebeat/Flume 采集器容器化部署（测试通过）
+6. 🔲 **用户画像** - 实现用户行为特征提取
+7. 🔲 **异常检测** - 实现基于统计的异常检测
+8. ✅ **AI 分析器** - 集成大模型 API（已完成，支持智谱AI/硅基流动/Kimi/阿里云百炼/OpenAI）
 
 ### P1 - 增强功能
 
-1. ✅ **Streamlit 界面** - 完善各个页面的展示逻辑（已完成）
-2. 🔲 **报告生成** - 实现日报和周报自动生成
-3. 🔲 **威胁分类** - 完善威胁类型体系
-4. 🔲 **行为基线** - 实现动态基线更新
+1. ✅ **Streamlit 界面** - 完善各个页面的展示逻辑（已完成，支持实时/模拟数据切换）
+2. ✅ **日志系统** - 配置日志输出到文件，支持数据来源标识
+3. 🔲 **报告生成** - 实现日报和周报自动生成
+4. 🔲 **威胁分类** - 完善威胁类型体系
+5. 🔲 **行为基线** - 实现动态基线更新
 
 ### P2 - 优化功能
 
@@ -255,10 +257,12 @@ def insert_one(self, log: Dict):
 # 采集器
 from src.collectors.base import BaseCollector
 from src.collectors.filebeat import FilebeatCollector
+from src.collectors.flume import FlumeCollector
 
 # 解析器
 from src.parsers.base import BaseParser
 from src.parsers.regex_parser import RegexParser
+from src.parsers.json_parser import JSONParser
 
 # 存储
 from src.storage.kafka_client import KafkaClient
@@ -272,6 +276,9 @@ from src.behavior.anomaly import AnomalyDetector
 from src.ai.analyzer import AIAnalyzer
 from src.ai.threat_classifier import ThreatClassifier
 
+# 可视化
+from src.visualization.dashboard import main as run_dashboard
+
 # 工具
 from src.utils.config import settings
 from src.utils.logger import get_logger
@@ -282,8 +289,33 @@ from src.utils.helpers import generate_id, parse_timestamp
 
 - **环境变量**: `.env`
 - **日志源配置**: `config/log_sources.yml`
-- **Filebeat 配置**: `config/filebeat.yml`
+- **Filebeat 配置**: `tests/collectors/filebeat-config.yml`（容器化配置）
+- **Docker Compose**: `tests/collectors/docker-compose-full.yml`
 - **数据库表结构**: `config/clickhouse.sql`
+
+### 容器化部署
+
+```bash
+# 启动所有服务（Kafka + ClickHouse + Filebeat）
+docker compose -f tests/collectors/docker-compose-full.yml up -d
+
+# 查看服务状态
+docker compose -f tests/collectors/docker-compose-full.yml ps
+
+# 停止服务
+docker compose -f tests/collectors/docker-compose-full.yml down
+```
+
+### 配置说明
+
+所有敏感配置（如数据库账号密码）应通过 `.env` 文件管理：
+
+```bash
+# .env 文件示例
+CLICKHOUSE_USER=your_username
+CLICKHOUSE_PASSWORD=your_password
+KAFKA_BOOTSTRAP_SERVERS=localhost:9092
+```
 
 ## 下一步行动
 
