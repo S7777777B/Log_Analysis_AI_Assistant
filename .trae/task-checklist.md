@@ -84,13 +84,13 @@
 - [ ] 添加解析器单元测试
 
 #### 3. 数据存储模块 (`src/storage/`)
-- [x] 实现 KafkaClient 的批量发送功能 ✅
-- [x] 实现 KafkaClient 的消费功能 ✅
-- [x] 实现 ClickHouse 连接管理 ✅
-- [x] 实现 ClickHouse 批量插入 ✅
-- [x] 实现 ClickHouse 查询接口 ✅
-- [x] 实现 ClickHouse 聚合查询 ✅
-- [x] 添加存储模块集成测试 ✅
+- [ ] 实现 KafkaClient 的批量发送功能
+- [ ] 实现 KafkaClient 的消费功能
+- [ ] 实现 ClickHouse 连接管理
+- [ ] 实现 ClickHouse 批量插入
+- [ ] 实现 ClickHouse 查询接口
+- [ ] 实现 ClickHouse 聚合查询
+- [ ] 添加存储模块集成测试
 
 #### 4. 用户行为建模模块 (`src/behavior/`)
 - [ ] 实现用户画像的数据提取逻辑
