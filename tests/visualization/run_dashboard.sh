@@ -10,7 +10,7 @@ echo "========================================"
 echo ""
 
 # 检查 Python 环境
-echo "[1/5] 检查 Python 环境..."
+echo "[1/4] 检查 Python 环境..."
 if ! command -v python3 &> /dev/null; then
     echo "❌ Python 3 未安装，请先安装 Python 3.9 或更高版本"
     echo ""
@@ -26,7 +26,7 @@ echo "✓ Python 已安装：$python_version"
 # 检查虚拟环境是否存在
 if [ ! -d "./venv" ]; then
     echo ""
-    echo "[2/5] 虚拟环境未找到，正在创建..."
+    echo "[2/4] 虚拟环境未找到，正在创建..."
     python3 -m venv venv
     if [ $? -ne 0 ]; then
         echo "✗ 虚拟环境创建失败，请检查权限"
@@ -34,28 +34,19 @@ if [ ! -d "./venv" ]; then
     fi
     echo "✓ 虚拟环境创建成功"
 else
-    echo "[2/5] 虚拟环境已存在"
+    echo "[2/4] 虚拟环境已存在"
 fi
 
 # 激活虚拟环境
-echo "[3/5] 激活虚拟环境..."
+echo "[3/4] 激活虚拟环境..."
 source venv/bin/activate
 if [ $? -ne 0 ]; then
     echo "✗ 虚拟环境激活失败"
     exit 1
 fi
 
-# 升级 pip
-echo "[4/5] 升级 pip..."
-pip install --upgrade pip > /dev/null 2>&1
-if [ $? -eq 0 ]; then
-    echo "✓ pip 升级成功"
-else
-    echo "⚠️ pip 升级失败，继续执行"
-fi
-
 # 安装项目依赖
-echo "[5/5] 安装项目依赖..."
+echo "[4/4] 安装项目依赖..."
 if [ -f "requirements.txt" ]; then
     pip install -r requirements.txt
     if [ $? -ne 0 ]; then

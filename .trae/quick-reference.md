@@ -96,19 +96,11 @@ git log --oneline
 
 ### 基础模块
 ```python
-# 解析器模块（已合并到 parsers.py）
-from src.parsers import BaseParser, JSONParser, RegexParser, LogparserParser
-from src.parsers import StandardLogSchema, FieldExtractor
-from src.parsers import COMMON_PATTERNS, PREDEFINED_PATTERNS, create_parser
+# 采集器基类
+from src.collectors.base import BaseCollector
 
-# 流式处理
-from src.parsers import StreamProcessor, DataCleaner
-
-# 主处理器
-from src.parsers import LogProcessor, load_config
-
-# 接口定义
-from src.parsers import DataSink, DataSource, StreamConsumer, StreamProducer
+# 解析器基类
+from src.parsers.base import BaseParser
 
 # 配置管理
 from src.utils.config import settings
@@ -241,6 +233,7 @@ except Exception as e:
 
 ## 数据类型速查
 
+<<<<<<< HEAD
 ### 日志数据结构（标准格式）
 ```python
 # JSON 解析器输出示例
@@ -323,6 +316,21 @@ processed_record = {
     "parser": "json",
     "parse_status": "success",
     "severity_level": "INFO"
+=======
+### 日志数据结构
+```python
+log_record = {
+    "timestamp": "2024-01-01 12:00:00",
+    "log_type": "vpn_login",
+    "username": "zhangsan",
+    "source_ip": "192.168.1.100",
+    "action": "LOGIN",
+    "status": "SUCCESS",
+    "location": "北京",
+    "raw_log": "原始日志内容",
+    "parser": "regex",
+    "parse_status": "success"
+>>>>>>> origin/feature-storage
 }
 ```
 
@@ -563,3 +571,9 @@ streamlit run dashboard.py --server.port 8502
 ---
 
 **提示**: 将此文件放在手边，开发时快速查阅！
+<<<<<<< HEAD
+=======
+
+**更新日期**: 2026-04-29
+**当前状态**: 数据存储模块（Kafka + ClickHouse）测试通过
+>>>>>>> origin/feature-storage
