@@ -50,7 +50,10 @@ except ImportError as e:
     logger.warning(f"⚠️ 无法导入存储模块，将使用模拟数据: {e}")
 
 from fpdf import FPDF
-from src.behavior.api import analyze_behavior_for_frontend
+from src.behavior.api import (
+    analyze_behavior_for_frontend,
+    analyze_behavior_from_clickhouse,
+)
 
 # 设置页面配置
 st.set_page_config(
@@ -428,12 +431,39 @@ def convert_behavior_result_for_dashboard(result: Dict[str, Any]) -> Dict[str, A
     }
 
 
+def get_behavior_analysis_for_dashboard(target_user: str = "zhangsan") -> Dict[str, Any]:
+    """优先读取 ClickHouse behavior，失败时回退到演示分析结果。"""
+    try:
+        clickhouse_result = analyze_behavior_from_clickhouse(target_user)
+    except Exception as exc:
+        logger.exception("获取 ClickHouse behavior 分析失败")
+        clickhouse_result = {
+            "success": False,
+            "source": "clickhouse",
+            "error": str(exc),
+        }
+
+    if clickhouse_result.get("success"):
+        dashboard_data = convert_behavior_result_for_dashboard(clickhouse_result)
+        dashboard_data["source"] = "clickhouse"
+        dashboard_data["fallback_reason"] = None
+        dashboard_data["clickhouse_error"] = None
+        return dashboard_data
+
+    demo_result = get_behavior_demo_result()
+    dashboard_data = convert_behavior_result_for_dashboard(demo_result)
+    dashboard_data["source"] = dashboard_data.get("source") or "behavior_demo"
+    dashboard_data["fallback_reason"] = clickhouse_result.get("error")
+    dashboard_data["clickhouse_error"] = clickhouse_result.get("error")
+    return dashboard_data
+
+
 def show_behavior_analysis_demo() -> None:
-    """展示由 behavior 模块真实分析得出的演示结果。"""
+    """展示真实数据优先、演示数据兜底的用户行为分析结果。"""
     st.divider()
     st.subheader("🧭 用户行为分析")
 
-    dashboard_data = convert_behavior_result_for_dashboard(get_behavior_demo_result())
+    dashboard_data = get_behavior_analysis_for_dashboard()
     if not dashboard_data["is_success"]:
         error = dashboard_data.get("error") or {}
         st.warning(f"Behavior 分析暂不可用：{error.get('message', '未知错误')}")
@@ -444,6 +474,11 @@ def show_behavior_analysis_demo() -> None:
     summary = dashboard_data["summary"]
 
     st.caption(f"数据来源：{dashboard_data['source']}")
+    if dashboard_data.get("fallback_reason"):
+        st.info(
+            "ClickHouse 数据不可用，已回退到 demo 数据。"
+            f" 原因：{dashboard_data['fallback_reason']}"
+        )
     col1, col2, col3, col4 = st.columns(4)
     with col1:
         st.metric("目标用户", dashboard_data.get("target_user") or "-")
