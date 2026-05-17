@@ -17,3 +17,6 @@ elasticsearch>=8.0.0         # Elasticsearch 客户端（可选，如不使用�
 # AI API
 openai>=1.0.0
 python-dotenv>=1.0.0
+
+# 测试
+pytest>=7.4,<10.0
