@@ -1,9 +1,12 @@
 """行为模块与存储层的协议定义。"""
 
+import os
 from datetime import datetime, timedelta
-from typing import Dict, List, Optional, Protocol
+from typing import Any, Dict, List, Optional, Protocol
 
 from src.behavior.normalizer import normalize_behavior_log, parse_timestamp_value
+from src.storage.clickhouse import ClickHouseClient
+from src.utils.helpers import format_datetime
 
 from src.behavior.schemas import (
     AnomalyResult,
@@ -148,3 +151,152 @@ class InMemoryBehaviorRepository:
     def save_anomalies(self, results: List[AnomalyResult]) -> None:
         """保存异常检测结果。"""
         self.anomalies.extend(dict(result) for result in results)
+
+
+class ClickHouseBehaviorDataError(Exception):
+    """ClickHouse 行为分析数据源错误。"""
+
+
+def structured_log_row_to_behavior_log(row: Dict[str, Any]) -> Dict[str, Any]:
+    """将 ``logs_structured`` 行转换为 behavior 可消费的日志结构。"""
+    if not isinstance(row, dict):
+        raise ClickHouseBehaviorDataError("logs_structured 行数据必须是 dict")
+
+    timestamp = row.get("timestamp")
+    if isinstance(timestamp, datetime):
+        timestamp = format_datetime(timestamp)
+
+    location = row.get("src_city") or row.get("location")
+    behavior_log: Dict[str, Any] = {
+        "timestamp": timestamp,
+        "username": row.get("username"),
+        "source_ip": row.get("source_ip"),
+        "location": location,
+        "action": row.get("action"),
+        "event_type": row.get("event_type"),
+        "status": row.get("result"),
+        "endpoint": row.get("uri"),
+        "method": row.get("method"),
+        "risk_score": row.get("risk_score"),
+        "risk_tags": row.get("risk_tags"),
+        "raw_log": row.get("raw_log"),
+    }
+    return {key: value for key, value in behavior_log.items() if value not in (None, "")}
+
+
+def build_behavior_payload_from_clickhouse(
+    target_user: str,
+    client_config: Optional[Dict[str, Any]] = None,
+    history_days: int = 30,
+    detection_hours: int = 24,
+    limit: int = 1000,
+) -> Dict[str, Any]:
+    """从 ClickHouse 读取用户日志并组装 behavior payload。"""
+    if not str(target_user).strip():
+        raise ClickHouseBehaviorDataError("target_user 不能为空")
+
+    config = client_config or _default_clickhouse_config()
+    client = ClickHouseClient(config)
+    database = str(config.get("database") or "log_analysis")
+
+    try:
+        client.connect()
+        if client.client is None:
+            raise ClickHouseBehaviorDataError("ClickHouse 连接未初始化")
+        if not _table_exists(client, database, "logs_structured"):
+            raise ClickHouseBehaviorDataError(f"{database}.logs_structured 不存在")
+
+        now = datetime.now()
+        history_start = now - timedelta(days=history_days)
+        detection_start = now - timedelta(hours=detection_hours)
+        history_rows = _query_structured_logs(
+            client,
+            database=database,
+            target_user=target_user,
+            start_time=history_start,
+            end_time=detection_start,
+            limit=limit,
+        )
+        detection_rows = _query_structured_logs(
+            client,
+            database=database,
+            target_user=target_user,
+            start_time=detection_start,
+            end_time=now,
+            limit=limit,
+        )
+
+        if not history_rows:
+            raise ClickHouseBehaviorDataError("目标用户无历史日志")
+        if not detection_rows:
+            raise ClickHouseBehaviorDataError("目标用户无检测日志")
+
+        return {
+            "target_user": str(target_user).strip(),
+            "history_logs": [structured_log_row_to_behavior_log(row) for row in history_rows],
+            "detection_logs": [structured_log_row_to_behavior_log(row) for row in detection_rows],
+        }
+    except ClickHouseBehaviorDataError:
+        raise
+    except Exception as exc:
+        raise ClickHouseBehaviorDataError(f"ClickHouse 查询失败: {exc}") from exc
+    finally:
+        client.close()
+
+
+def _default_clickhouse_config() -> Dict[str, Any]:
+    """读取环境变量生成 ClickHouse 客户端配置。"""
+    return {
+        "host": os.getenv("CLICKHOUSE_HOST", "localhost"),
+        "port": int(os.getenv("CLICKHOUSE_PORT", "8123")),
+        "username": os.getenv("CLICKHOUSE_USER", "default"),
+        "password": os.getenv("CLICKHOUSE_PASSWORD", ""),
+        "database": os.getenv("CLICKHOUSE_DATABASE", "log_analysis"),
+    }
+
+
+def _table_exists(client: ClickHouseClient, database: str, table: str) -> bool:
+    """检查指定 ClickHouse 表是否存在。"""
+    if client.client is None:
+        return False
+    result = client.client.query(
+        """
+        SELECT count()
+        FROM system.tables
+        WHERE database = %(database)s AND name = %(table)s
+        """,
+        parameters={"database": database, "table": table},
+    )
+    return bool(result.result_rows and int(result.result_rows[0][0]) > 0)
+
+
+def _query_structured_logs(
+    client: ClickHouseClient,
+    database: str,
+    target_user: str,
+    start_time: datetime,
+    end_time: datetime,
+    limit: int,
+) -> List[Dict[str, Any]]:
+    """按时间窗口读取用户结构化日志。"""
+    if client.client is None:
+        raise ClickHouseBehaviorDataError("ClickHouse 连接未初始化")
+    query = f"""
+        SELECT *
+        FROM {database}.logs_structured
+        WHERE username = %(username)s
+          AND timestamp >= %(start_time)s
+          AND timestamp <= %(end_time)s
+        ORDER BY timestamp ASC
+        LIMIT %(limit)s
+    """
+    result = client.client.query(
+        query,
+        parameters={
+            "username": target_user,
+            "start_time": start_time,
+            "end_time": end_time,
+            "limit": limit,
+        },
+    )
+    return [dict(zip(result.column_names, row)) for row in result.result_rows]
