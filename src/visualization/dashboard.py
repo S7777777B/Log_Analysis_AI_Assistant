@@ -67,6 +67,17 @@ except ImportError as e:
 
 from fpdf import FPDF
 
+# ClickHouse 客户端辅助函数
+def get_clickhouse_client():
+    """获取 ClickHouse 客户端实例"""
+    return ClickHouseClient({
+        'host': settings.clickhouse_host,
+        'port': settings.clickhouse_port,
+        'username': settings.clickhouse_user,
+        'password': settings.clickhouse_password,
+        'database': settings.clickhouse_database
+    })
+
 # 设置页面配置
 st.set_page_config(
     page_title="日志分析 AI 助手",
@@ -390,7 +401,7 @@ def get_sample_search_results():
 
 def fetch_realtime_logs(log_type="全部", limit=100):
     """从 ClickHouse 获取真实日志数据"""
-    client = ClickHouseClient()
+    client = get_clickhouse_client()
     query = """
         SELECT timestamp, log_type, username, source_ip, status, location, risk_level
         FROM security_logs
@@ -424,7 +435,7 @@ def fetch_realtime_logs(log_type="全部", limit=100):
 
 def fetch_anomaly_users(time_range="最近 24 小时", limit=10):
     """从 ClickHouse 获取真实异常用户数据"""
-    client = ClickHouseClient()
+    client = get_clickhouse_client()
     
     time_map = {
         "最近 24 小时": 24,
@@ -459,7 +470,7 @@ def fetch_anomaly_users(time_range="最近 24 小时", limit=10):
 
 def fetch_security_metrics():
     """从 ClickHouse 获取真实安全指标数据"""
-    client = ClickHouseClient()
+    client = get_clickhouse_client()
     
     # 获取整体安全评分
     score_query = "SELECT AVG(security_score) FROM daily_security_scores WHERE date = TODAY()"
@@ -491,7 +502,7 @@ def fetch_security_metrics():
 
 def fetch_security_trend(days=7):
     """从 ClickHouse 获取真实安全评分趋势"""
-    client = ClickHouseClient()
+    client = get_clickhouse_client()
     query = """
         SELECT date, security_score, anomaly_count
         FROM daily_security_scores
@@ -516,7 +527,7 @@ def fetch_security_trend(days=7):
 
 def fetch_risk_distribution():
     """从 ClickHouse 获取真实风险等级分布"""
-    client = ClickHouseClient()
+    client = get_clickhouse_client()
     query = "SELECT risk_level, COUNT(*) FROM anomaly_events WHERE event_time >= TODAY() GROUP BY risk_level"
     result = client.query(query)
     
@@ -530,7 +541,7 @@ def fetch_risk_distribution():
 
 def fetch_threat_stats():
     """从 ClickHouse 获取真实威胁类型统计"""
-    client = ClickHouseClient()
+    client = get_clickhouse_client()
     query = "SELECT threat_type, COUNT(*) FROM anomaly_events WHERE event_time >= TODAY() GROUP BY threat_type"
     result = client.query(query)
     
@@ -544,7 +555,7 @@ def fetch_threat_stats():
 
 def fetch_ai_suggestions(status_filter="全部", risk_filter="全部"):
     """从 ClickHouse 获取真实 AI 处置建议"""
-    client = ClickHouseClient()
+    client = get_clickhouse_client()
     query = """
         SELECT id, username, threat_type, risk_level, anomaly_description, 
                ai_analysis, suggestion, confidence, status, create_time
@@ -586,7 +597,7 @@ def fetch_ai_suggestions(status_filter="全部", risk_filter="全部"):
 def fetch_history_logs(start_time=None, end_time=None, username=None, source_ip=None, 
                        log_type="全部", status="全部"):
     """从 ClickHouse 搜索真实历史日志"""
-    client = ClickHouseClient()
+    client = get_clickhouse_client()
     query = """
         SELECT timestamp, username, log_type, source_ip, status, location, risk_level
         FROM security_logs
@@ -764,7 +775,7 @@ def create_sidebar():
             "实时日志流": "📡",
             "UEBA 异常排行": "👥",
             "安全评分看板": "🛡️",
-            "AI 处置建议": "🤖",
+            "处置+AI建议": "🤖",
             "历史查询": "🔍"
         }
         
@@ -1229,7 +1240,7 @@ def main():
         show_ueba_ranking()
     elif st.session_state.current_page == "安全评分看板":
         show_security_score()
-    elif st.session_state.current_page == "AI 处置建议":
+    elif st.session_state.current_page == "处置+AI建议":
         show_ai_suggestions()
     elif st.session_state.current_page == "历史查询":
         show_history_search()
