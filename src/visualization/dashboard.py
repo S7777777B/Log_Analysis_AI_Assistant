@@ -19,6 +19,18 @@ import logging
 # 设置日志配置
 import os
 
+from dotenv import load_dotenv
+
+# 加载项目根目录的 .env 文件
+load_dotenv()
+
+# 强制覆盖 ClickHouse 连接参数为测试容器使用的值（避免 .env 配置错误）
+os.environ['CLICKHOUSE_HOST'] = 'localhost'
+os.environ['CLICKHOUSE_PORT'] = '8123'
+os.environ['CLICKHOUSE_USER'] = 'test_user'
+os.environ['CLICKHOUSE_PASSWORD'] = 'test_password'
+os.environ['CLICKHOUSE_DATABASE'] = 'test_logs'
+
 # 确保 logs 目录存在
 logs_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "logs")
 os.makedirs(logs_dir, exist_ok=True)
@@ -515,15 +527,14 @@ def show_behavior_analysis_demo(
 # ==================== 真实接口层 ====================
 
 def fetch_realtime_logs(log_type="全部", limit=100):
-    """从 ClickHouse structured_logs 表获取真实日志"""
+    """从 ClickHouse logs_structured 表获取真实日志，状态基于 event_type 字段"""
     try:
         from clickhouse_connect import get_client
-        # 使用与测试脚本一致的凭据
         client = get_client(
             host='localhost',
             port=8123,
-            username='test_user',          # 关键：与 docker-compose 一致
-            password='test_password',      # 关键：与 docker-compose 一致
+            username='test_user',
+            password='test_password',
             database='test_logs',
             connect_timeout=5
         )
@@ -531,10 +542,18 @@ def fetch_realtime_logs(log_type="全部", limit=100):
         logger.warning(f"ClickHouse 连接失败: {e}")
         return get_sample_logs(log_type)
 
-    # 查询 structured_logs 表
+    # 查询包含 event_type 字段
     query = """
-        SELECT timestamp, log_type, username, source_ip, action, src_city, risk_score
-        FROM structured_logs
+        SELECT
+            toTimezone(timestamp, 'Asia/Shanghai') AS local_timestamp,
+            log_type,
+            username,
+            source_ip,
+            action,
+            src_city,
+            risk_score,
+            event_type
+        FROM logs_structured
         ORDER BY timestamp DESC
         LIMIT %s
     """
@@ -542,34 +561,46 @@ def fetch_realtime_logs(log_type="全部", limit=100):
         result = client.query(query, (limit,))
         logs = []
         for row in result.result_rows:
-            # row: [timestamp, log_type, username, source_ip, action, src_city, risk_score]
-            # 根据状态字段判断成功/失败
-            action = row[4] if len(row) > 4 else ""
-            status = "✅ 成功" if action in ("LOGIN", "LOGOUT", "SUCCESS") else "❌ 失败"
-            # 风险等级显示
-            risk_score = row[6] if len(row) > 6 else 0
-            if risk_score is not None:
-                try:
-                    score = int(risk_score)
-                    if score >= 80:
-                        risk = "🔴 高危"
-                    elif score >= 50:
-                        risk = "🟠 中危"
-                    elif score >= 20:
-                        risk = "🟡 低危"
-                    else:
-                        risk = "🟢 正常"
-                except:
-                    risk = "🟢 正常"
+            local_time = row[0]
+            log_type_val = row[1] or "未知"
+            username = row[2] or "未知"
+            source_ip = row[3] or "未知"
+            action = row[4] or ""
+            city = row[5] if len(row) > 5 and row[5] else "未知"
+            risk_score = row[6] if row[6] is not None else 0
+            event_type = row[7] if len(row) > 7 else ""
+
+            # 状态判断优先级: event_type -> action
+            if event_type == "LOGIN_SUCCESS":
+                status = "✅ 成功"
+            elif event_type == "LOGIN_FAIL":
+                status = "❌ 失败"
+            elif action in ("LOGIN", "LOGOUT", "API_CALL"):
+                status = "✅ 成功"
             else:
+                status = "❓ 未知"
+
+            # 风险等级映射
+            try:
+                score = int(risk_score)
+                if score >= 80:
+                    risk = "🔴 高危"
+                elif score >= 50:
+                    risk = "🟠 中危"
+                elif score >= 20:
+                    risk = "🟡 低危"
+                else:
+                    risk = "🟢 正常"
+            except:
                 risk = "🟢 正常"
+
             logs.append({
-                "时间": row[0].strftime("%Y-%m-%d %H:%M:%S") if row[0] else "",
-                "类型": row[1] or "未知",
-                "用户": row[2] or "未知",
-                "IP": row[3] or "未知",
+                "时间": local_time.strftime("%Y-%m-%d %H:%M:%S") if local_time else "",
+                "类型": log_type_val,
+                "用户": username,
+                "IP": source_ip,
                 "状态": status,
-                "地点": row[5] if len(row) > 5 and row[5] else "未知",
+                "地点": city,
                 "风险": risk
             })
         client.close()
@@ -582,7 +613,7 @@ def fetch_realtime_logs(log_type="全部", limit=100):
             logger.info("ClickHouse 中无数据，使用模拟数据")
             return get_sample_logs(log_type)
     except Exception as e:
-        logger.error(f"查询 structured_logs 失败: {e}")
+        logger.error(f"查询 logs_structured 失败: {e}")
         return get_sample_logs(log_type)
 
 
@@ -800,6 +831,30 @@ def fetch_history_logs(start_time=None, end_time=None, username=None, source_ip=
     
     return logs
 
+def get_recent_usernames_from_clickhouse(limit: int = 20) -> List[str]:
+    """从 logs_structured 表中获取最近有活动的用户名列表（按最新时间排序）"""
+    try:
+        from clickhouse_connect import get_client
+        client = get_client(
+            host='localhost', port=8123,
+            username='test_user', password='test_password',
+            database='test_logs', connect_timeout=5
+        )
+        query = """
+            SELECT DISTINCT username
+            FROM logs_structured
+            WHERE username != ''
+            ORDER BY max(timestamp) DESC
+            LIMIT %(limit)s
+        """
+        result = client.query(query, parameters={'limit': limit})
+        usernames = [row[0] for row in result.result_rows if row[0]]
+        client.close()
+        return usernames
+    except Exception as e:
+        logger.error(f"获取真实用户名失败: {e}")
+        # 降级返回 demo 用户
+        return ["zhangsan", "lisi", "wangwu", "zhaoliu", "sunqi"]
 
 # ==================== 数据访问层（统一入口） ====================
 
@@ -832,83 +887,60 @@ def get_anomaly_users(time_range="最近 24 小时", limit=10):
 
 
 def get_ueba_ranking_from_clickhouse(time_range: str = "最近 24 小时", limit: int = 10) -> Dict[str, Any]:
-    """从 logs_structured 聚合生成 UEBA 排行，失败时返回稳定结构。"""
+    """直接从 ClickHouse logs_structured 表聚合排行，不再回退 demo"""
+    import clickhouse_connect
     time_map = {
         "最近 24 小时": 24,
         "最近 7 天": 24 * 7,
         "最近 30 天": 24 * 30,
-        "24h": 24,
-        "7d": 24 * 7,
-        "30d": 24 * 30,
     }
-    hours = time_map.get(time_range, 24 * 30)
-    config = {
-        "host": os.getenv("CLICKHOUSE_HOST", "localhost"),
-        "port": int(os.getenv("CLICKHOUSE_PORT", "8123")),
-        "username": os.getenv("CLICKHOUSE_USER", "default"),
-        "password": os.getenv("CLICKHOUSE_PASSWORD", ""),
-        "database": os.getenv("CLICKHOUSE_DATABASE", "log_analysis"),
-    }
-    client = ClickHouseClient(config)
+    hours = time_map.get(time_range, 24)
     try:
-        client.connect()
-        if client.client is None:
-            raise RuntimeError("ClickHouse 连接未初始化")
-        database = config["database"]
-        table_check = client.client.query(
-            """
-            SELECT count()
-            FROM system.tables
-            WHERE database = %(database)s AND name = 'logs_structured'
-            """,
-            parameters={"database": database},
+        client = clickhouse_connect.get_client(
+            host='localhost', port=8123,
+            username='test_user', password='test_password',
+            database='test_logs', connect_timeout=10
         )
-        if not table_check.result_rows or int(table_check.result_rows[0][0]) == 0:
-            raise RuntimeError(f"{database}.logs_structured 不存在")
+    except Exception as e:
+        logger.error(f"ClickHouse 连接失败: {e}")
+        return {"success": False, "ranking": []}
 
-        query = f"""
+    try:
+        query = """
             SELECT
                 username,
                 max(ifNull(risk_score, 0)) / 100.0 AS score,
-                countIf(result = 'FAILED' OR ifNull(risk_score, 0) >= 70) AS event_count,
-                max(timestamp) AS last_event_time
-            FROM {database}.logs_structured
+                count(*) AS event_count,
+                max(toTimezone(timestamp, 'Asia/Shanghai')) AS last_event_time
+            FROM logs_structured
             WHERE timestamp >= now() - INTERVAL %(hours)s HOUR
               AND username != ''
             GROUP BY username
-            HAVING event_count > 0
             ORDER BY score DESC, event_count DESC, last_event_time DESC
             LIMIT %(limit)s
         """
-        result = client.client.query(query, parameters={"hours": hours, "limit": limit})
+        result = client.query(query, parameters={"hours": hours, "limit": limit})
         ranking = []
-        for index, row in enumerate(result.result_rows, 1):
-            item = dict(zip(result.column_names, row))
-            score = float(item.get("score") or 0.0)
+        for idx, row in enumerate(result.result_rows, start=1):
+            username = row[0]
+            score = float(row[1]) if row[1] is not None else 0.0
+            event_count = int(row[2]) if row[2] is not None else 0
+            last_time = row[3]
+            last_time_str = last_time.strftime("%Y-%m-%d %H:%M") if last_time else ""
             ranking.append({
-                "rank": index,
-                "username": item.get("username"),
+                "rank": idx,
+                "username": username,
                 "score": score,
                 "risk_level": _format_ueba_risk_level(score),
-                "event_count": int(item.get("event_count") or 0),
-                "last_event_time": item["last_event_time"].strftime("%Y-%m-%d %H:%M") if item.get("last_event_time") else "",
+                "event_count": event_count,
+                "last_event_time": last_time_str,
             })
-        return {
-            "success": True,
-            "source": "clickhouse",
-            "fallback_reason": None,
-            "ranking": ranking,
-        }
-    except Exception as exc:
-        logger.error(f"❌ 获取 UEBA ClickHouse 排行失败: {exc}")
-        return {
-            "success": False,
-            "source": "clickhouse",
-            "fallback_reason": str(exc),
-            "ranking": [],
-        }
-    finally:
         client.close()
+        return {"success": True, "ranking": ranking}
+    except Exception as e:
+        logger.error(f"查询排行失败: {e}", exc_info=True)
+        client.close()
+        return {"success": False, "ranking": []}
 
 
 def _format_ueba_risk_level(score: float) -> str:
@@ -1125,106 +1157,90 @@ def show_realtime_logs():
 
 
 def show_ueba_ranking():
-    """显示 UEBA 异常用户排行"""
+    """显示 UEBA 异常用户排行（仅从 ClickHouse 读取）"""
     st.header("👥 UEBA 异常用户排行")
     st.markdown("基于用户行为基线，识别异常用户并排序")
-    
-    # 时间范围选择
+
     col1, col2 = st.columns(2)
     with col1:
-        time_range = st.selectbox("时间范围", ["最近 24 小时", "最近 7 天", "最近 30 天", "自定义"])
+        time_range = st.selectbox("时间范围", ["最近 24 小时", "最近 7 天", "最近 30 天"])
     with col2:
         risk_filter = st.multiselect("风险等级", ["🔴 高危", "🟠 中危", "🟡 低危"], default=["🔴 高危", "🟠 中危", "🟡 低危"])
-    
+        # 注意：risk_filter 目前仅用于前端展示，实际排行未过滤，您可以后续实现
+
     st.divider()
-    
-    # 异常用户 TOP10 排行
     st.subheader("🔴 异常用户 TOP10")
-    
-    clickhouse_ranking = get_ueba_ranking_from_clickhouse(time_range)
-    if clickhouse_ranking.get("success") and clickhouse_ranking.get("ranking"):
-        ranking_rows = clickhouse_ranking["ranking"]
-        ranking_source = "clickhouse"
-        ranking_fallback_reason = None
-    else:
-        ranking_rows = _demo_ranking_to_rows(get_sample_anomaly_users())
-        ranking_source = "demo"
-        ranking_fallback_reason = clickhouse_ranking.get("fallback_reason") or "ClickHouse 排行为空"
 
-    df_ranking = _ranking_rows_to_dataframe(ranking_rows)
-    st.caption(f"UEBA TOP10 数据来源：{ranking_source}")
-    if ranking_fallback_reason:
-        st.info(f"ClickHouse 排行数据不可用，已回退 demo。原因：{ranking_fallback_reason}")
+    ranking_result = get_ueba_ranking_from_clickhouse(time_range, limit=10)
+    if not ranking_result.get("success") or not ranking_result.get("ranking"):
+        st.error("无法从 ClickHouse 获取排行数据，请检查后端服务是否正常")
+        return
 
-    # 使用进度条展示异常评分
+    ranking_rows = ranking_result["ranking"]
+    df_ranking = pd.DataFrame([
+        {
+            "排名": r["rank"],
+            "用户名": r["username"],
+            "异常评分": r["score"],
+            "风险等级": r["risk_level"],
+            "异常事件数": r["event_count"],
+            "最近异常时间": r["last_event_time"],
+        }
+        for r in ranking_rows
+    ])
     st.dataframe(
         df_ranking,
         use_container_width=True,
         hide_index=True,
-        column_config={
-            "异常评分": st.column_config.ProgressColumn("异常评分", min_value=0, max_value=1, format="%.2f")
-        }
+        column_config={"异常评分": st.column_config.ProgressColumn("异常评分", min_value=0, max_value=1, format="%.2f")}
     )
-    
+
     st.divider()
+    st.subheader("📋 用户行为分析详情")
 
-    # 高危用户详情
-    st.subheader("📋 高危用户详情")
-    user_options = [row["username"] for row in ranking_rows]
-    selected_user = st.selectbox("选择用户查看详情", user_options)
-    selected_behavior_data = get_behavior_analysis_for_dashboard(selected_user)
+    # 获取真实用户名列表（来自 ClickHouse）
+    real_usernames = [row["username"] for row in ranking_rows if row.get("username")]
+    if not real_usernames:
+        st.warning("没有找到任何用户日志数据")
+        return
 
-    show_behavior_analysis_demo(selected_user, selected_behavior_data)
-    
-    if selected_user:
-        selected_row = next((row for row in ranking_rows if row["username"] == selected_user), None) or {}
-        col1, col2, col3, col4 = st.columns(4)
-        with col1:
-            st.metric("异常评分", f"{float(selected_row.get('score', 0.0)):.2f}")
-        with col2:
-            st.metric("异常事件数", str(len(selected_behavior_data.get("anomalies", []))))
-        with col3:
-            st.metric("风险等级", selected_row.get("risk_level", "-"))
-        with col4:
-            st.metric("处置状态", "待处置")
-        
-        st.divider()
-        
-        # 异常行为列表
-        st.markdown("**🚨 异常行为列表：**")
-        st.caption(f"高危用户详情 异常明细来源：{selected_behavior_data.get('source', '-')}")
-        if selected_behavior_data.get("fallback_reason"):
-            st.info(
-                "ClickHouse 行为分析不可用，已回退 demo。"
-                f" 原因：{selected_behavior_data['fallback_reason']}"
-            )
+    selected_user = st.selectbox("选择用户查看行为分析", real_usernames)
+    # 直接调用行为分析接口（不再有 demo 回退）
+    behavior_result = analyze_behavior_from_clickhouse(selected_user)
+    if not behavior_result.get("success"):
+        st.error(f"行为分析失败：{behavior_result.get('error', '未知错误')}")
+        return
 
-        anomaly_events = selected_behavior_data.get("anomalies", [])
-        if not anomaly_events:
-            st.info("暂无异常行为")
+    # 展示分析结果
+    baseline = behavior_result.get("baseline", {})
+    summary = behavior_result.get("summary", {})
+    col_a, col_b, col_c, col_d = st.columns(4)
+    with col_a:
+        st.metric("目标用户", selected_user)
+    with col_b:
+        st.metric("基线样本数", str(baseline.get("sample_count", 0)))
+    with col_c:
+        st.metric("基线可靠", "是" if baseline.get("is_reliable") else "否")
+    with col_d:
+        st.metric("异常数量", str(len(behavior_result.get("anomalies", []))))
 
-        for i, event in enumerate(anomaly_events):
-            event_time = event.get("timestamp", "-")
-            event_type = event.get("anomaly_type", "-")
-            with st.expander(f"⚠️ {event_time} - {event_type}"):
-                col1, col2 = st.columns(2)
-                with col1:
-                    st.markdown(f"**时间**: {event_time}")
-                    st.markdown(f"**类型**: {event_type}")
-                    st.markdown(f"**描述**: {event.get('reason', '-')}")
-                with col2:
-                    st.markdown(f"**风险等级**: {event.get('risk_level', '-')}")
-                    st.markdown(f"**风险评分**: {event.get('risk_score', '-')}")
-                
-                col1, col2 = st.columns(2)
-                with col1:
-                    if st.button("✅ 标记为误报", key=f"false_{i}"):
-                        st.success("已标记为误报")
-                with col2:
-                    if st.button("🤖 生成 AI 建议", key=f"ai_{i}"):
-                        st.info("🔍 AI 分析中...")
-                        st.success("建议：立即冻结账号，联系用户确认，调查登录来源 IP")
+    detail_col1, detail_col2, detail_col3 = st.columns(3)
+    with detail_col1:
+        st.markdown(f"**常用时间段**: {baseline.get('common_hours', [])}")
+    with detail_col2:
+        st.markdown(f"**常用 IP**: {baseline.get('common_ips', [])}")
+    with detail_col3:
+        st.markdown(f"**常用地点**: {baseline.get('common_locations', [])}")
 
+    st.markdown("**摘要指标**")
+    st.json(summary)
+
+    st.markdown("**异常事件列表**")
+    anomalies = behavior_result.get("anomalies", [])
+    if anomalies:
+        st.dataframe(pd.DataFrame(anomalies), use_container_width=True, hide_index=True)
+    else:
+        st.info("未检测到异常行为")
 
 def show_security_score():
     """显示安全评分看板"""
