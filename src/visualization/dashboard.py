@@ -17,10 +17,16 @@ import io
 import logging
 
 # 设置日志配置
+import sys
 import os
 
+# 将项目根目录添加到 Python 路径
+project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+if project_root not in sys.path:
+    sys.path.insert(0, project_root)
+
 # 确保 logs 目录存在
-logs_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "logs")
+logs_dir = os.path.join(project_root, "logs")
 os.makedirs(logs_dir, exist_ok=True)
 
 # 获取当前日期作为日志文件名
@@ -48,6 +54,16 @@ try:
 except ImportError as e:
     STORAGE_AVAILABLE = False
     logger.warning(f"⚠️ 无法导入存储模块，将使用模拟数据: {e}")
+
+# 尝试导入 AI 模块
+try:
+    from src.ai.analyzer import AIAnalyzer
+    from src.utils.config import settings
+    AI_AVAILABLE = True
+    logger.info("✅ 成功导入 AI 模块")
+except ImportError as e:
+    AI_AVAILABLE = False
+    logger.warning(f"⚠️ 无法导入 AI 模块: {e}")
 
 from fpdf import FPDF
 
@@ -174,6 +190,55 @@ def init_session_state():
         st.session_state.ai_suggestions = []
     if "data_source" not in st.session_state:
         st.session_state.data_source = "模拟数据"
+
+
+@st.cache_resource
+def get_ai_analyzer():
+    """获取 AI 分析器实例（缓存）"""
+    if not AI_AVAILABLE:
+        return None
+    try:
+        config = settings.current_ai_config
+        analyzer = AIAnalyzer(
+            api_key=config["api_key"],
+            platform=config["platform"],
+            model=config.get("model"),
+            base_url=config.get("base_url"),
+        )
+        logger.info(f"🤖 AI 分析器初始化成功: platform={config['platform']}")
+        return analyzer
+    except Exception as e:
+        logger.error(f"❌ AI 分析器初始化失败: {e}")
+        return None
+
+
+def analyze_anomaly_with_ai(username: str, anomaly_description: str, log_context: str = None) -> Dict[str, Any]:
+    """使用 AI 分析异常行为"""
+    analyzer = get_ai_analyzer()
+    if analyzer is None:
+        return {
+            "threat_type": "AI_UNAVAILABLE",
+            "risk_level": "MEDIUM",
+            "description": "AI 服务不可用，请检查配置",
+            "suggestion": "请人工审查该异常行为"
+        }
+    
+    try:
+        result = analyzer.analyze_anomaly(
+            username=username,
+            anomaly_description=anomaly_description,
+            log_context=log_context
+        )
+        logger.info(f"🤖 AI 分析完成: user={username}, threat={result.get('threat_type')}")
+        return result
+    except Exception as e:
+        logger.error(f"❌ AI 分析失败: {e}")
+        return {
+            "threat_type": "ANALYSIS_ERROR",
+            "risk_level": "MEDIUM",
+            "description": f"AI 分析失败: {str(e)}",
+            "suggestion": "请人工审查该异常行为"
+        }
 
 
 # ==================== 模拟数据层 ====================
@@ -859,8 +924,19 @@ def show_ueba_ranking():
                         st.success("已标记为误报")
                 with col2:
                     if st.button("🤖 生成 AI 建议", key=f"ai_{i}"):
-                        st.info("🔍 AI 分析中...")
-                        st.success("建议：立即冻结账号，联系用户确认，调查登录来源 IP")
+                        with st.spinner("🔍 AI 分析中..."):
+                            log_context = f"IP: {event['IP']}, 地点: {event['地点']}, 时间: {event['时间']}"
+                            ai_result = analyze_anomaly_with_ai(
+                                username=selected_user,
+                                anomaly_description=event['描述'],
+                                log_context=log_context
+                            )
+                        
+                        st.markdown("---")
+                        st.markdown(f"**🚨 威胁类型**: {ai_result.get('threat_type', 'UNKNOWN')}")
+                        st.markdown(f"**⚠️ 风险等级**: {ai_result.get('risk_level', 'MEDIUM')}")
+                        st.info(f"**📝 分析说明**: {ai_result.get('description', '')}")
+                        st.warning(f"**💡 处置建议**: {ai_result.get('suggestion', '')}")
 
 
 def show_security_score():
