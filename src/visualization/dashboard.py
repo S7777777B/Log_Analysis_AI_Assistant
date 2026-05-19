@@ -515,37 +515,75 @@ def show_behavior_analysis_demo(
 # ==================== 真实接口层 ====================
 
 def fetch_realtime_logs(log_type="全部", limit=100):
-    """从 ClickHouse 获取真实日志数据"""
-    client = ClickHouseClient()
+    """从 ClickHouse structured_logs 表获取真实日志"""
+    try:
+        from clickhouse_connect import get_client
+        # 使用与测试脚本一致的凭据
+        client = get_client(
+            host='localhost',
+            port=8123,
+            username='test_user',          # 关键：与 docker-compose 一致
+            password='test_password',      # 关键：与 docker-compose 一致
+            database='test_logs',
+            connect_timeout=5
+        )
+    except Exception as e:
+        logger.warning(f"ClickHouse 连接失败: {e}")
+        return get_sample_logs(log_type)
+
+    # 查询 structured_logs 表
     query = """
-        SELECT timestamp, log_type, username, source_ip, status, location, risk_level
-        FROM security_logs
-        WHERE 1=1
+        SELECT timestamp, log_type, username, source_ip, action, src_city, risk_score
+        FROM structured_logs
+        ORDER BY timestamp DESC
+        LIMIT %s
     """
-    params = []
-    
-    if log_type != "全部":
-        query += " AND log_type = %s"
-        params.append(log_type)
-    
-    query += " ORDER BY timestamp DESC LIMIT %s"
-    params.append(limit)
-    
-    result = client.query(query, tuple(params))
-    
-    logs = []
-    for row in result:
-        logs.append({
-            "时间": row[0].strftime("%Y-%m-%d %H:%M:%S"),
-            "类型": row[1],
-            "用户": row[2],
-            "IP": row[3],
-            "状态": row[4],
-            "地点": row[5],
-            "风险": row[6]
-        })
-    
-    return logs
+    try:
+        result = client.query(query, (limit,))
+        logs = []
+        for row in result.result_rows:
+            # row: [timestamp, log_type, username, source_ip, action, src_city, risk_score]
+            # 根据状态字段判断成功/失败
+            action = row[4] if len(row) > 4 else ""
+            status = "✅ 成功" if action in ("LOGIN", "LOGOUT", "SUCCESS") else "❌ 失败"
+            # 风险等级显示
+            risk_score = row[6] if len(row) > 6 else 0
+            if risk_score is not None:
+                try:
+                    score = int(risk_score)
+                    if score >= 80:
+                        risk = "🔴 高危"
+                    elif score >= 50:
+                        risk = "🟠 中危"
+                    elif score >= 20:
+                        risk = "🟡 低危"
+                    else:
+                        risk = "🟢 正常"
+                except:
+                    risk = "🟢 正常"
+            else:
+                risk = "🟢 正常"
+            logs.append({
+                "时间": row[0].strftime("%Y-%m-%d %H:%M:%S") if row[0] else "",
+                "类型": row[1] or "未知",
+                "用户": row[2] or "未知",
+                "IP": row[3] or "未知",
+                "状态": status,
+                "地点": row[5] if len(row) > 5 and row[5] else "未知",
+                "风险": risk
+            })
+        client.close()
+        if logs:
+            logger.info(f"从 ClickHouse 获取 {len(logs)} 条真实日志")
+            if log_type != "全部":
+                logs = [log for log in logs if log["类型"] == log_type]
+            return logs
+        else:
+            logger.info("ClickHouse 中无数据，使用模拟数据")
+            return get_sample_logs(log_type)
+    except Exception as e:
+        logger.error(f"查询 structured_logs 失败: {e}")
+        return get_sample_logs(log_type)
 
 
 def fetch_anomaly_users(time_range="最近 24 小时", limit=10):
