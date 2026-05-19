@@ -77,31 +77,51 @@ def analyze_behavior_for_frontend(payload: dict) -> dict:
         return _error_response("ANALYSIS_ERROR", "Behavior 分析失败，请稍后重试。")
 
 
-def analyze_behavior_from_clickhouse(
-    target_user: str,
-    history_days: int = 30,
-    detection_hours: int = 24,
-    limit: int = 1000,
-    client_config: Optional[Dict[str, Any]] = None,
-) -> Dict[str, Any]:
-    """从 ClickHouse 读取日志并返回稳定的 Behavior 分析结果。"""
+def analyze_behavior_from_clickhouse(target_user: str) -> Dict[str, Any]:
+    import clickhouse_connect
+    from src.behavior.service import BehaviorAnalysisService
+
+    ch_config = {
+        'host': 'localhost',
+        'port': 8123,
+        'username': 'test_user',
+        'password': 'test_password',
+        'database': 'test_logs'
+    }
     try:
-        payload = build_behavior_payload_from_clickhouse(
-            target_user=target_user,
-            client_config=client_config,
-            history_days=history_days,
-            detection_hours=detection_hours,
-            limit=limit,
-        )
-        result = analyze_behavior_for_frontend(payload)
-        result["source"] = "clickhouse"
-        return result
-    except ClickHouseBehaviorDataError as exc:
-        logger.warning("ClickHouse Behavior 数据源不可用: {}", exc)
-        return _clickhouse_error_response(target_user, str(exc))
-    except Exception:
-        logger.exception("ClickHouse Behavior 分析失败")
-        return _clickhouse_error_response(target_user, "ClickHouse Behavior 分析失败，请稍后重试。")
+        client = clickhouse_connect.get_client(**ch_config, connect_timeout=5)
+    except Exception as e:
+        return {"success": False, "error": f"ClickHouse 连接失败: {e}"}
+
+    try:
+        # 历史日志（最近24小时）
+        history_query = """
+            SELECT * FROM logs_structured
+            WHERE username = %(user)s AND timestamp >= now() - INTERVAL 24 HOUR
+            ORDER BY timestamp
+        """
+        history_result = client.query(history_query, parameters={'user': target_user})
+        history_logs = [dict(zip(history_result.column_names, row)) for row in history_result.result_rows]
+
+        # 检测日志（最近1小时）
+        detection_query = """
+            SELECT * FROM logs_structured
+            WHERE username = %(user)s AND timestamp >= now() - INTERVAL 1 HOUR
+            ORDER BY timestamp
+        """
+        detection_result = client.query(detection_query, parameters={'user': target_user})
+        detection_logs = [dict(zip(detection_result.column_names, row)) for row in detection_result.result_rows]
+
+        client.close()
+        if not detection_logs:
+            return {"success": False, "error": f"用户 {target_user} 最近1小时无日志"}
+
+        service = BehaviorAnalysisService()
+        result = service.analyze_user(target_user, history_logs, detection_logs)
+        return {"success": True, **result}
+    except Exception as e:
+        client.close()
+        return {"success": False, "error": str(e)}
 
 
 def _validate_payload(payload: Any) -> _ValidatedPayload:
