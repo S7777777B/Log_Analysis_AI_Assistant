@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any, Dict, List, Optional, TypedDict
 
 from src.behavior.normalizer import get_username, parse_timestamp_value
+from src.behavior.repository import ClickHouseBehaviorDataError, build_behavior_payload_from_clickhouse
 from src.behavior.service import BehaviorAnalysisService
 from src.utils.helpers import format_datetime
 
@@ -74,6 +75,33 @@ def analyze_behavior_for_frontend(payload: dict) -> dict:
     except Exception:
         logger.exception("Behavior 前端接口分析失败")
         return _error_response("ANALYSIS_ERROR", "Behavior 分析失败，请稍后重试。")
+
+
+def analyze_behavior_from_clickhouse(
+    target_user: str,
+    history_days: int = 30,
+    detection_hours: int = 24,
+    limit: int = 1000,
+    client_config: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    """从 ClickHouse 读取日志并返回稳定的 Behavior 分析结果。"""
+    try:
+        payload = build_behavior_payload_from_clickhouse(
+            target_user=target_user,
+            client_config=client_config,
+            history_days=history_days,
+            detection_hours=detection_hours,
+            limit=limit,
+        )
+        result = analyze_behavior_for_frontend(payload)
+        result["source"] = "clickhouse"
+        return result
+    except ClickHouseBehaviorDataError as exc:
+        logger.warning("ClickHouse Behavior 数据源不可用: {}", exc)
+        return _clickhouse_error_response(target_user, str(exc))
+    except Exception:
+        logger.exception("ClickHouse Behavior 分析失败")
+        return _clickhouse_error_response(target_user, "ClickHouse Behavior 分析失败，请稍后重试。")
 
 
 def _validate_payload(payload: Any) -> _ValidatedPayload:
@@ -224,4 +252,24 @@ def _error_response(code: str, message: str) -> Dict[str, Any]:
             "code": code,
             "message": message,
         },
+    }
+
+
+
+def _clickhouse_error_response(target_user: str, message: str) -> Dict[str, Any]:
+    """构造 ClickHouse 数据源稳定失败响应。"""
+    return {
+        "success": False,
+        "source": "clickhouse",
+        "target_user": target_user,
+        "baseline": None,
+        "profile": None,
+        "anomalies": [],
+        "summary": {
+            "total_logs": 0,
+            "anomaly_count": 0,
+            "max_risk_score": 0,
+            "overall_risk_level": "UNKNOWN",
+        },
+        "error": message,
     }
