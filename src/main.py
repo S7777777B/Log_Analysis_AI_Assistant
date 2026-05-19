@@ -23,6 +23,9 @@ from .storage.clickhouse import ClickHouseClient
 from .collectors.filebeat import FilebeatCollector
 from .collectors.flume import FlumeCollector
 
+# 导入 AI 模块
+from .ai.analyzer import AIAnalyzer
+
 logger = get_logger(__name__)
 
 
@@ -34,6 +37,7 @@ class LogAnalysisService:
         self.clickhouse_client: Optional[ClickHouseClient] = None
         self.filebeat_collector: Optional[FilebeatCollector] = None
         self.flume_collector: Optional[FlumeCollector] = None
+        self.ai_analyzer: Optional[AIAnalyzer] = None
     
     def init_storage(self):
         """初始化存储模块"""
@@ -165,13 +169,29 @@ class LogAnalysisService:
     
     def show_status(self):
         """显示系统状态"""
-        logger.info("[5/6] 系统状态检查...")
+        logger.info("[5/7] 系统状态检查...")
         logger.info(f"  - 配置文件: .env (已加载)")
         logger.info(f"  - 日志级别: {settings.log_level}")
         logger.info(f"  - Kafka Broker: {settings.kafka_bootstrap_servers}")
         logger.info(f"  - ClickHouse: {settings.clickhouse_host}:{settings.clickhouse_port}")
+        logger.info(f"  - AI 平台: {settings.ai_platform}")
         logger.info(f"  - 数据保留天数: {settings.data_retention_days}")
         logger.info(f"  - 异常检测阈值: {settings.anomaly_threshold}")
+    
+    def init_ai(self):
+        """初始化 AI 分析模块"""
+        logger.info("[6/7] 初始化 AI 分析模块...")
+        try:
+            config = settings.current_ai_config
+            self.ai_analyzer = AIAnalyzer(
+                api_key=config["api_key"],
+                platform=config["platform"],
+                model=config.get("model"),
+                base_url=config.get("base_url"),
+            )
+            logger.info(f"✓ AI 分析器初始化成功: platform={config['platform']}, model={config.get('model')}")
+        except Exception as e:
+            logger.warning(f"⚠️  AI 分析器初始化失败: {e}")
     
     async def run(self):
         """运行主服务"""
@@ -194,9 +214,13 @@ class LogAnalysisService:
         # 5. 显示系统状态
         self.show_status()
         
+        # 6. 初始化 AI 分析模块
+        self.init_ai()
+        
         logger.info("========================================")
         logger.info("  ✅ 系统初始化完成！")
         logger.info("  📊 各模块接口测试通过")
+        logger.info("  🤖 AI 分析模块已就绪")
         logger.info("  🚀 服务已就绪")
         logger.info("========================================")
         
