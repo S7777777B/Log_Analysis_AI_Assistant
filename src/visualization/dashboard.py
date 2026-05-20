@@ -16,6 +16,10 @@ import time
 import io
 import logging
 
+from src.ai.analyzer import AIAnalyzer
+from src.utils.config import settings
+import clickhouse_connect
+
 # 设置日志配置
 import os
 
@@ -23,13 +27,6 @@ from dotenv import load_dotenv
 
 # 加载项目根目录的 .env 文件
 load_dotenv()
-
-# 强制覆盖 ClickHouse 连接参数为测试容器使用的值（避免 .env 配置错误）
-os.environ['CLICKHOUSE_HOST'] = 'localhost'
-os.environ['CLICKHOUSE_PORT'] = '8123'
-os.environ['CLICKHOUSE_USER'] = 'test_user'
-os.environ['CLICKHOUSE_PASSWORD'] = 'test_password'
-os.environ['CLICKHOUSE_DATABASE'] = 'test_logs'
 
 # 确保 logs 目录存在
 logs_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "logs")
@@ -527,38 +524,37 @@ def show_behavior_analysis_demo(
 # ==================== 真实接口层 ====================
 
 def fetch_realtime_logs(log_type="全部", limit=100):
-    """从 ClickHouse logs_structured 表获取真实日志，状态基于 event_type 字段"""
+    """从 ClickHouse logs_structured 表获取真实日志，使用 settings 配置"""
+    import clickhouse_connect
     try:
-        from clickhouse_connect import get_client
-        client = get_client(
-            host='localhost',
-            port=8123,
-            username='test_user',
-            password='test_password',
-            database='test_logs',
+        client = clickhouse_connect.get_client(
+            host=settings.clickhouse_host,
+            port=settings.clickhouse_port,
+            username=settings.clickhouse_user,
+            password=settings.clickhouse_password,
+            database=settings.clickhouse_database,
             connect_timeout=5
         )
     except Exception as e:
         logger.warning(f"ClickHouse 连接失败: {e}")
         return get_sample_logs(log_type)
 
-    # 查询包含 event_type 字段
-    query = """
-        SELECT
-            toTimezone(timestamp, 'Asia/Shanghai') AS local_timestamp,
-            log_type,
-            username,
-            source_ip,
-            action,
-            src_city,
-            risk_score,
-            event_type
-        FROM logs_structured
-        ORDER BY timestamp DESC
-        LIMIT %s
+    query = f"""
+    SELECT
+        toTimezone(timestamp, 'Asia/Shanghai') AS local_timestamp,
+        log_type,
+        username,
+        source_ip,
+        action,
+        src_city,
+        risk_score,
+        event_type
+    FROM {settings.clickhouse_table}
+    ORDER BY timestamp DESC
+    LIMIT {limit}
     """
     try:
-        result = client.query(query, (limit,))
+        result = client.query(query)
         logs = []
         for row in result.result_rows:
             local_time = row[0]
@@ -570,7 +566,7 @@ def fetch_realtime_logs(log_type="全部", limit=100):
             risk_score = row[6] if row[6] is not None else 0
             event_type = row[7] if len(row) > 7 else ""
 
-            # 状态判断优先级: event_type -> action
+            # 状态判断
             if event_type == "LOGIN_SUCCESS":
                 status = "✅ 成功"
             elif event_type == "LOGIN_FAIL":
@@ -613,69 +609,110 @@ def fetch_realtime_logs(log_type="全部", limit=100):
             logger.info("ClickHouse 中无数据，使用模拟数据")
             return get_sample_logs(log_type)
     except Exception as e:
-        logger.error(f"查询 logs_structured 失败: {e}")
+        logger.error(f"查询 {settings.clickhouse_table} 失败: {e}")
         return get_sample_logs(log_type)
 
 
 def fetch_anomaly_users(time_range="最近 24 小时", limit=10):
-    """从 ClickHouse 获取真实异常用户数据"""
-    client = ClickHouseClient()
-    
+    """从 anomaly_detection 表获取异常用户排行"""
+    import clickhouse_connect
     time_map = {
         "最近 24 小时": 24,
         "最近 7 天": 168,
         "最近 30 天": 720
     }
     hours = time_map.get(time_range, 24)
-    
-    query = """
-        SELECT username, anomaly_score, risk_level, anomaly_count, last_anomaly_time
-        FROM user_anomaly_scores
-        WHERE last_anomaly_time >= NOW() - INTERVAL %s HOUR
-        ORDER BY anomaly_score DESC
-        LIMIT %s
+    try:
+        client = clickhouse_connect.get_client(
+            host=settings.clickhouse_host,
+            port=settings.clickhouse_port,
+            username=settings.clickhouse_user,
+            password=settings.clickhouse_password,
+            database=settings.clickhouse_database,
+            connect_timeout=5
+        )
+    except Exception as e:
+        logger.error(f"ClickHouse 连接失败: {e}")
+        return get_sample_anomaly_users()
+
+    query = f"""
+    SELECT
+        username,
+        max(anomaly_score) as max_score,
+        count() as anomaly_count,
+        max(detection_time) as last_time
+    FROM anomaly_detection
+    WHERE detection_time >= now() - INTERVAL {hours} HOUR
+    GROUP BY username
+    ORDER BY max_score DESC
+    LIMIT {limit}
     """
-    
-    result = client.query(query, (hours, limit))
-    
-    users = []
-    for i, row in enumerate(result, 1):
-        users.append({
-            "排名": i,
-            "用户名": row[0],
-            "异常评分": row[1],
-            "风险等级": row[2],
-            "异常事件数": row[3],
-            "最近异常时间": row[4].strftime("%Y-%m-%d %H:%M")
-        })
-    
-    return users
+    try:
+        result = client.query(query)
+        users = []
+        for i, row in enumerate(result.result_rows, 1):
+            users.append({
+                "排名": i,
+                "用户名": row[0],
+                "异常评分": round(row[1], 2),
+                "风险等级": "🔴 高危" if row[1] >= 0.8 else ("🟠 中危" if row[1] >= 0.5 else "🟡 低危"),
+                "异常事件数": row[2],
+                "最近异常时间": row[3].strftime("%Y-%m-%d %H:%M") if row[3] else ""
+            })
+        client.close()
+        return users
+    except Exception as e:
+        logger.error(f"查询 anomaly_detection 失败: {e}")
+        return get_sample_anomaly_users()
 
 
 def fetch_security_metrics():
-    """从 ClickHouse 获取真实安全指标数据"""
-    client = ClickHouseClient()
-    
-    # 获取整体安全评分
-    score_query = "SELECT AVG(security_score) FROM daily_security_scores WHERE date = TODAY()"
-    score_result = client.query(score_query)
-    security_score = int(score_result[0][0]) if score_result else 75
-    
-    # 获取今日异常事件数
-    anomaly_query = "SELECT COUNT(*) FROM anomaly_events WHERE event_time >= TODAY()"
+    """从 ClickHouse 计算安全指标"""
+    import clickhouse_connect
+    try:
+        client = clickhouse_connect.get_client(
+            host=settings.clickhouse_host,
+            port=settings.clickhouse_port,
+            username=settings.clickhouse_user,
+            password=settings.clickhouse_password,
+            database=settings.clickhouse_database,
+            connect_timeout=5
+        )
+    except Exception as e:
+        logger.error(f"ClickHouse 连接失败: {e}")
+        return get_sample_security_metrics()
+
+    # 今日异常事件数（从 anomaly_detection 表）
+    anomaly_query = f"""
+    SELECT count() FROM anomaly_detection
+    WHERE toDate(detection_time) = today()
+    """
     anomaly_result = client.query(anomaly_query)
-    anomaly_count = anomaly_result[0][0] if anomaly_result else 12
-    
-    # 获取高危用户数
-    high_risk_query = "SELECT COUNT(*) FROM user_anomaly_scores WHERE risk_level = '🔴 高危'"
+    anomaly_count = anomaly_result.result_rows[0][0] if anomaly_result.result_rows else 0
+
+    # 高危用户数（最近24小时 anomaly_score >= 0.8 的去重用户）
+    high_risk_query = f"""
+    SELECT count(DISTINCT username) FROM anomaly_detection
+    WHERE detection_time >= now() - INTERVAL 1 DAY AND anomaly_score >= 0.8
+    """
     high_risk_result = client.query(high_risk_query)
-    high_risk_count = high_risk_result[0][0] if high_risk_result else 5
-    
-    # 获取已处置事件数
-    disposed_query = "SELECT COUNT(*) FROM anomaly_events WHERE status = '已处置' AND event_time >= TODAY()"
+    high_risk_count = high_risk_result.result_rows[0][0] if high_risk_result.result_rows else 0
+
+    # 已处置事件数（is_processed = true）
+    disposed_query = f"""
+    SELECT count() FROM anomaly_detection
+    WHERE is_processed = 1 AND toDate(detection_time) = today()
+    """
     disposed_result = client.query(disposed_query)
-    disposed_count = disposed_result[0][0] if disposed_result else 8
-    
+    disposed_count = disposed_result.result_rows[0][0] if disposed_result.result_rows else 0
+
+    # 整体安全评分：简单模拟，可根据需要计算（例如 (1 - 高危比例) * 100）
+    total_users_query = f"SELECT count(DISTINCT username) FROM {settings.clickhouse_table} WHERE toDate(timestamp) = today()"
+    total_users_res = client.query(total_users_query)
+    total_users = total_users_res.result_rows[0][0] if total_users_res.result_rows else 1
+    security_score = max(0, 100 - int(high_risk_count / total_users * 100)) if total_users > 0 else 75
+
+    client.close()
     return {
         "security_score": security_score,
         "anomaly_count": anomaly_count,
@@ -685,175 +722,310 @@ def fetch_security_metrics():
 
 
 def fetch_security_trend(days=7):
-    """从 ClickHouse 获取真实安全评分趋势"""
-    client = ClickHouseClient()
-    query = """
-        SELECT date, security_score, anomaly_count
-        FROM daily_security_scores
-        WHERE date >= TODAY() - INTERVAL %s DAY
-        ORDER BY date
+    """获取近几天异常事件数趋势"""
+    import clickhouse_connect
+    try:
+        client = clickhouse_connect.get_client(
+            host=settings.clickhouse_host,
+            port=settings.clickhouse_port,
+            username=settings.clickhouse_user,
+            password=settings.clickhouse_password,
+            database=settings.clickhouse_database,
+            connect_timeout=5
+        )
+    except Exception as e:
+        logger.error(f"ClickHouse 连接失败: {e}")
+        return get_sample_security_trend(days)
+
+    query = f"""
+    SELECT
+        toDate(detection_time) as date,
+        count() as anomaly_count
+    FROM anomaly_detection
+    WHERE detection_time >= today() - INTERVAL {days} DAY
+    GROUP BY date
+    ORDER BY date
     """
-    result = client.query(query, (days,))
-    
-    data = {
-        "日期": [],
-        "安全评分": [],
-        "异常事件数": []
-    }
-    
-    for row in result:
-        data["日期"].append(row[0].strftime("%Y-%m-%d"))
-        data["安全评分"].append(row[1])
-        data["异常事件数"].append(row[2])
-    
+    result = client.query(query)
+    data = {"日期": [], "安全评分": [], "异常事件数": []}
+    # 补全缺失的日期
+    date_list = [(datetime.now() - timedelta(days=i)).date() for i in range(days-1, -1, -1)]
+    row_dict = {row[0]: row[1] for row in result.result_rows}
+    for d in date_list:
+        data["日期"].append(d.strftime("%Y-%m-%d"))
+        anomaly_cnt = row_dict.get(d, 0)
+        data["异常事件数"].append(anomaly_cnt)
+        # 安全评分简单模拟：100 - 异常事件数 * 5 (限制范围)
+        score = max(0, 100 - anomaly_cnt * 5)
+        data["安全评分"].append(score)
+    client.close()
     return pd.DataFrame(data)
 
 
 def fetch_risk_distribution():
-    """从 ClickHouse 获取真实风险等级分布"""
-    client = ClickHouseClient()
-    query = "SELECT risk_level, COUNT(*) FROM anomaly_events WHERE event_time >= TODAY() GROUP BY risk_level"
+    """从 anomaly_detection 统计风险等级分布"""
+    import clickhouse_connect
+    try:
+        client = clickhouse_connect.get_client(
+            host=settings.clickhouse_host,
+            port=settings.clickhouse_port,
+            username=settings.clickhouse_user,
+            password=settings.clickhouse_password,
+            database=settings.clickhouse_database,
+            connect_timeout=5
+        )
+    except Exception as e:
+        logger.error(f"ClickHouse 连接失败: {e}")
+        return get_sample_risk_distribution()
+
+    query = f"""
+    SELECT
+        risk_level,
+        count() as cnt
+    FROM anomaly_detection
+    WHERE toDate(detection_time) = today()
+    GROUP BY risk_level
+    """
     result = client.query(query)
-    
     data = {"风险等级": [], "事件数": []}
-    for row in result:
-        data["风险等级"].append(row[0])
+    # 映射等级显示
+    level_map = {"HIGH": "🔴 高危", "MEDIUM": "🟠 中危", "LOW": "🟡 低危"}
+    for row in result.result_rows:
+        level = level_map.get(row[0], row[0])
+        data["风险等级"].append(level)
         data["事件数"].append(row[1])
-    
+    client.close()
     return pd.DataFrame(data)
 
-
 def fetch_threat_stats():
-    """从 ClickHouse 获取真实威胁类型统计"""
-    client = ClickHouseClient()
-    query = "SELECT threat_type, COUNT(*) FROM anomaly_events WHERE event_time >= TODAY() GROUP BY threat_type"
+    """从 anomaly_detection 统计威胁类型"""
+    import clickhouse_connect
+    try:
+        client = clickhouse_connect.get_client(
+            host=settings.clickhouse_host,
+            port=settings.clickhouse_port,
+            username=settings.clickhouse_user,
+            password=settings.clickhouse_password,
+            database=settings.clickhouse_database,
+            connect_timeout=5
+        )
+    except Exception as e:
+        logger.error(f"ClickHouse 连接失败: {e}")
+        return get_sample_threat_stats()
+
+    query = f"""
+    SELECT
+        threat_type,
+        count() as cnt
+    FROM anomaly_detection
+    WHERE toDate(detection_time) = today() AND threat_type IS NOT NULL
+    GROUP BY threat_type
+    ORDER BY cnt DESC
+    LIMIT 5
+    """
     result = client.query(query)
-    
     data = {"威胁类型": [], "数量": []}
-    for row in result:
-        data["威胁类型"].append(row[0])
+    for row in result.result_rows:
+        data["威胁类型"].append(row[0] or "未知")
         data["数量"].append(row[1])
-    
+    client.close()
     return pd.DataFrame(data)
 
 
 def fetch_ai_suggestions(status_filter="全部", risk_filter="全部"):
-    """从 ClickHouse 获取真实 AI 处置建议"""
-    client = ClickHouseClient()
-    query = """
-        SELECT id, username, threat_type, risk_level, anomaly_description, 
-               ai_analysis, suggestion, confidence, status, create_time
-        FROM ai_suggestions
-        WHERE 1=1
+    """从 anomaly_detection 表获取 AI 分析后的异常数据"""
+    import clickhouse_connect
+    try:
+        client = clickhouse_connect.get_client(
+            host=settings.clickhouse_host,
+            port=settings.clickhouse_port,
+            username=settings.clickhouse_user,
+            password=settings.clickhouse_password,
+            database=settings.clickhouse_database,
+            connect_timeout=5
+        )
+    except Exception as e:
+        logger.error(f"ClickHouse 连接失败: {e}")
+        return []   # 不再返回 demo
+
+    query = f"""
+    SELECT
+        id,
+        username,
+        threat_type,
+        risk_level,
+        description,
+        ai_analysis,
+        `处置建议` AS suggestion,
+        anomaly_score AS confidence,
+        is_processed,
+        detection_time AS create_time
+    FROM anomaly_detection
+    WHERE 1=1
     """
-    params = []
-    
-    if status_filter != "全部":
-        query += " AND status = %s"
-        params.append(status_filter)
-    
+    params = {}
     if risk_filter != "全部":
-        query += " AND risk_level = %s"
-        params.append(risk_filter)
-    
-    query += " ORDER BY create_time DESC"
-    
-    result = client.query(query, tuple(params) if params else None)
-    
-    suggestions = []
-    for row in result:
-        suggestions.append({
-            "id": row[0],
-            "用户": row[1],
-            "威胁类型": row[2],
-            "风险等级": row[3],
-            "异常描述": row[4],
-            "AI 分析": row[5],
-            "处置建议": row[6],
-            "置信度": f"{row[7]}%",
-            "处置状态": row[8],
-            "生成时间": row[9].strftime("%Y-%m-%d %H:%M")
-        })
-    
-    return suggestions
+        risk_map = {"🔴 高危": "HIGH", "🟠 中危": "MEDIUM", "🟡 低危": "LOW"}
+        db_risk = risk_map.get(risk_filter)
+        if db_risk:
+            query += " AND risk_level = %(risk_level)s"
+            params['risk_level'] = db_risk
+    if status_filter != "全部":
+        if status_filter == "待处置":
+            query += " AND is_processed = 0"
+        elif status_filter == "已处置":
+            query += " AND is_processed = 1"
+        else:
+            # 处置中、误报暂不支持
+            return []
+    query += " ORDER BY detection_time DESC LIMIT 100"
+    try:
+        result = client.query(query, parameters=params)
+        suggestions = []
+        for row in result.result_rows:
+            confidence = int(row[7] * 100) if row[7] else 0
+            suggestions.append({
+                "id": row[0],
+                "用户": row[1],
+                "威胁类型": row[2] or "未知",
+                "风险等级": _risk_level_to_icon(row[3]),
+                "异常描述": row[4] or "",
+                "AI 分析": row[5] or "暂无 AI 分析",
+                "处置建议": row[6] or "请人工审查",
+                "置信度": f"{confidence}%",
+                "处置状态": "已处置" if row[8] else "待处置",
+                "生成时间": row[9].strftime("%Y-%m-%d %H:%M") if row[9] else ""
+            })
+        client.close()
+        return suggestions
+    except Exception as e:
+        logger.error(f"查询 anomaly_detection 失败: {e}")
+        return []
+
+def _risk_level_to_icon(level: str) -> str:
+    """将数据库中的风险等级转换为前端图标"""
+    level = level.upper() if level else ""
+    if level == "CRITICAL" or level == "HIGH":
+        return "🔴 高危"
+    elif level == "MEDIUM":
+        return "🟠 中危"
+    elif level == "LOW":
+        return "🟡 低危"
+    else:
+        return "🟡 低危"
 
 
-def fetch_history_logs(start_time=None, end_time=None, username=None, source_ip=None, 
+def fetch_history_logs(start_time=None, end_time=None, username=None, source_ip=None,
                        log_type="全部", status="全部"):
-    """从 ClickHouse 搜索真实历史日志"""
-    client = ClickHouseClient()
-    query = """
-        SELECT timestamp, username, log_type, source_ip, status, location, risk_level
-        FROM security_logs
-        WHERE 1=1
+    """从 ClickHouse logs_structured 表搜索历史日志"""
+    import clickhouse_connect
+    try:
+        client = clickhouse_connect.get_client(
+            host=settings.clickhouse_host,
+            port=settings.clickhouse_port,
+            username=settings.clickhouse_user,
+            password=settings.clickhouse_password,
+            database=settings.clickhouse_database,
+            connect_timeout=5
+        )
+    except Exception as e:
+        logger.error(f"ClickHouse 连接失败: {e}")
+        return get_sample_search_results()
+
+    query = f"""
+    SELECT
+        timestamp,
+        username,
+        log_type,
+        source_ip,
+        result,
+        src_city,
+        risk_score
+    FROM {settings.clickhouse_table}
+    WHERE 1=1
     """
     params = []
-    
     if start_time:
-        query += " AND timestamp >= %s"
+        query += " AND toDate(timestamp) >= %s"
         params.append(start_time)
-    
     if end_time:
-        query += " AND timestamp <= %s"
+        query += " AND toDate(timestamp) <= %s"
         params.append(end_time)
-    
     if username:
         query += " AND username = %s"
         params.append(username)
-    
     if source_ip:
         query += " AND source_ip = %s"
         params.append(source_ip)
-    
     if log_type != "全部":
         query += " AND log_type = %s"
         params.append(log_type)
-    
     if status != "全部":
-        query += " AND status = %s"
-        params.append(status)
-    
+        # 状态映射
+        if status == "成功":
+            query += " AND result = 'SUCCESS'"
+        elif status == "失败":
+            query += " AND result = 'FAIL'"
+        # 警告/阻断 暂不支持
     query += " ORDER BY timestamp DESC LIMIT 100"
-    
-    result = client.query(query, tuple(params) if params else None)
-    
-    logs = []
-    for row in result:
-        logs.append({
-            "时间": row[0].strftime("%Y-%m-%d %H:%M:%S"),
-            "用户": row[1],
-            "类型": row[2],
-            "IP": row[3],
-            "状态": row[4],
-            "地点": row[5],
-            "风险等级": row[6]
-        })
-    
-    return logs
+    try:
+        result = client.query(query, parameters=tuple(params) if params else None)
+        logs = []
+        for row in result.result_rows:
+            risk = "🟢 正常"
+            if row[6] is not None:
+                score = int(row[6])
+                if score >= 80:
+                    risk = "🔴 高危"
+                elif score >= 50:
+                    risk = "🟠 中危"
+                elif score >= 20:
+                    risk = "🟡 低危"
+            logs.append({
+                "时间": row[0].strftime("%Y-%m-%d %H:%M:%S"),
+                "用户": row[1],
+                "类型": row[2],
+                "IP": row[3],
+                "状态": "✅ 成功" if row[4] == "SUCCESS" else ("❌ 失败" if row[4] == "FAIL" else "❓ 未知"),
+                "地点": row[5] or "未知",
+                "风险等级": risk
+            })
+        client.close()
+        return logs
+    except Exception as e:
+        logger.error(f"查询历史日志失败: {e}")
+        return get_sample_search_results()
 
 def get_recent_usernames_from_clickhouse(limit: int = 20) -> List[str]:
-    """从 logs_structured 表中获取最近有活动的用户名列表（按最新时间排序）"""
+    """从 logs_structured 表获取最近有活动的用户名"""
+    import clickhouse_connect
     try:
-        from clickhouse_connect import get_client
-        client = get_client(
-            host='localhost', port=8123,
-            username='test_user', password='test_password',
-            database='test_logs', connect_timeout=5
+        client = clickhouse_connect.get_client(
+            host=settings.clickhouse_host,
+            port=settings.clickhouse_port,
+            username=settings.clickhouse_user,
+            password=settings.clickhouse_password,
+            database=settings.clickhouse_database,
+            connect_timeout=5
         )
-        query = """
-            SELECT DISTINCT username
-            FROM logs_structured
-            WHERE username != ''
-            ORDER BY max(timestamp) DESC
-            LIMIT %(limit)s
-        """
-        result = client.query(query, parameters={'limit': limit})
+    except Exception as e:
+        logger.error(f"ClickHouse 连接失败: {e}")
+        return ["zhangsan", "lisi", "wangwu", "zhaoliu", "sunqi"]
+
+    query = f"""
+    SELECT DISTINCT username
+    FROM {settings.clickhouse_table}
+    WHERE username != ''
+    ORDER BY max(timestamp) DESC
+    LIMIT {limit}
+    """
+    try:
+        result = client.query(query)
         usernames = [row[0] for row in result.result_rows if row[0]]
         client.close()
         return usernames
     except Exception as e:
         logger.error(f"获取真实用户名失败: {e}")
-        # 降级返回 demo 用户
         return ["zhangsan", "lisi", "wangwu", "zhaoliu", "sunqi"]
 
 # ==================== 数据访问层（统一入口） ====================
@@ -887,7 +1059,7 @@ def get_anomaly_users(time_range="最近 24 小时", limit=10):
 
 
 def get_ueba_ranking_from_clickhouse(time_range: str = "最近 24 小时", limit: int = 10) -> Dict[str, Any]:
-    """直接从 ClickHouse logs_structured 表聚合排行，不再回退 demo"""
+    """从 logs_structured 表聚合用户风险排行"""
     import clickhouse_connect
     time_map = {
         "最近 24 小时": 24,
@@ -897,29 +1069,32 @@ def get_ueba_ranking_from_clickhouse(time_range: str = "最近 24 小时", limit
     hours = time_map.get(time_range, 24)
     try:
         client = clickhouse_connect.get_client(
-            host='localhost', port=8123,
-            username='test_user', password='test_password',
-            database='test_logs', connect_timeout=10
+            host=settings.clickhouse_host,
+            port=settings.clickhouse_port,
+            username=settings.clickhouse_user,
+            password=settings.clickhouse_password,
+            database=settings.clickhouse_database,
+            connect_timeout=10
         )
     except Exception as e:
         logger.error(f"ClickHouse 连接失败: {e}")
         return {"success": False, "ranking": []}
 
+    query = f"""
+    SELECT
+        username,
+        max(ifNull(risk_score, 0)) / 100.0 AS score,
+        count(*) AS event_count,
+        max(toTimezone(timestamp, 'Asia/Shanghai')) AS last_event_time
+    FROM {settings.clickhouse_table}
+    WHERE timestamp >= now() - INTERVAL {hours} HOUR
+      AND username != ''
+    GROUP BY username
+    ORDER BY score DESC, event_count DESC, last_event_time DESC
+    LIMIT {limit}
+    """
     try:
-        query = """
-            SELECT
-                username,
-                max(ifNull(risk_score, 0)) / 100.0 AS score,
-                count(*) AS event_count,
-                max(toTimezone(timestamp, 'Asia/Shanghai')) AS last_event_time
-            FROM logs_structured
-            WHERE timestamp >= now() - INTERVAL %(hours)s HOUR
-              AND username != ''
-            GROUP BY username
-            ORDER BY score DESC, event_count DESC, last_event_time DESC
-            LIMIT %(limit)s
-        """
-        result = client.query(query, parameters={"hours": hours, "limit": limit})
+        result = client.query(query)
         ranking = []
         for idx, row in enumerate(result.result_rows, start=1):
             username = row[0]
@@ -1044,16 +1219,24 @@ def get_threat_stats():
 
 def get_ai_suggestions(status_filter="全部", risk_filter="全部"):
     """获取 AI 处置建议（统一入口）"""
-    if STORAGE_AVAILABLE:
-        try:
-            data = fetch_ai_suggestions(status_filter, risk_filter)
-            logger.info(f"🤖 当前显示: 实时数据 - 从 ClickHouse 获取 {len(data)} 条 AI 建议")
+    # 直接调用 ClickHouse 查询，不使用 STORAGE_AVAILABLE 标志
+    try:
+        data = fetch_ai_suggestions(status_filter, risk_filter)
+        # 如果返回的是 demo 数据（通过检查是否包含特定 id 或用户），则视为失败
+        if data and len(data) > 0 and data[0].get("id") and data[0]["id"] in [1,2,3,4,5]:
+            # 这是模拟数据的特征 id，说明查询失败返回了 demo
+            logger.info("🤖 当前显示: 模拟数据 - AI 处置建议 (查询返回 demo)")
             return data
-        except Exception as e:
-            logger.error(f"❌ 获取 AI 建议失败: {e}")
-    
-    logger.info("🤖 当前显示: 模拟数据 - AI 处置建议")
-    return get_sample_ai_suggestions(status_filter, risk_filter)
+        logger.info(f"🤖 当前显示: 实时数据 - 从 ClickHouse 获取 {len(data)} 条 AI 建议")
+        return data
+    except Exception as e:
+        logger.error(f"❌ 获取 AI 建议失败: {e}")
+        # 对于无法映射的状态（处置中、误报），直接返回空列表，不显示 demo
+        if status_filter in ("处置中", "误报"):
+            logger.info(f"状态 '{status_filter}' 暂不支持，返回空列表")
+            return []
+        logger.info("🤖 当前显示: 模拟数据 - AI 处置建议 (降级)")
+        return get_sample_ai_suggestions(status_filter, risk_filter)
 
 
 def search_history_logs(start_time=None, end_time=None, username=None, source_ip=None, 
@@ -1321,11 +1504,9 @@ def show_security_score():
 
 
 def show_ai_suggestions():
-    """显示 AI 处置建议"""
     st.header("🤖 AI 处置建议")
     st.markdown("AI 智能分析异常行为，提供处置建议")
     
-    # 筛选条件
     col1, col2 = st.columns(2)
     with col1:
         status_filter = st.selectbox("处置状态", ["全部", "待处置", "处置中", "已处置", "误报"])
@@ -1334,33 +1515,25 @@ def show_ai_suggestions():
     
     st.divider()
     
-    # AI 处置建议列表
-    # 从接口获取处置建议数据
+    # 获取数据（使用真实或模拟）
     suggestions = get_ai_suggestions(status_filter, risk_filter)
     
-    # 根据筛选条件过滤建议（接口已处理过滤，这里保留冗余过滤作为双重保障）
+    # 过滤
     filtered_suggestions = []
-    for suggestion in suggestions:
-        # 状态筛选
-        if status_filter != "全部" and suggestion["处置状态"] != status_filter:
+    for s in suggestions:
+        if status_filter != "全部" and s["处置状态"] != status_filter:
             continue
-        # 风险等级筛选
-        if risk_filter != "全部" and suggestion["风险等级"] != risk_filter:
+        if risk_filter != "全部" and s["风险等级"] != risk_filter:
             continue
-        filtered_suggestions.append(suggestion)
+        filtered_suggestions.append(s)
     
-    # 按处置状态分类显示
     status_order = ["待处置", "处置中", "已处置", "误报"]
     for status in status_order:
         status_suggestions = [s for s in filtered_suggestions if s["处置状态"] == status]
         if status_suggestions:
-            # 根据风险等级排序（高危 > 中危 > 低危）
             risk_order = {"🔴 高危": 0, "🟠 中危": 1, "🟡 低危": 2}
             status_suggestions.sort(key=lambda x: risk_order[x["风险等级"]])
-            
-            # 显示状态分组
             st.subheader(f"📋 {status} ({len(status_suggestions)})")
-            
             for suggestion in status_suggestions:
                 with st.expander(
                     f"{suggestion['风险等级']} {suggestion['威胁类型']} - {suggestion['用户']} ({suggestion['生成时间']})",
@@ -1373,48 +1546,60 @@ def show_ai_suggestions():
                         st.metric("置信度", suggestion["置信度"])
                     with col3:
                         st.metric("处置状态", suggestion["处置状态"])
-                    
                     st.divider()
-                    
                     st.markdown(f"**📝 异常描述：**\n{suggestion['异常描述']}")
                     st.info(f"**🤖 AI 分析：**\n{suggestion['AI 分析']}")
                     st.warning(f"**💡 处置建议：**\n{suggestion['处置建议']}")
-                    
                     st.divider()
                     
-                    # 按钮行
-                    col1, col2, col3 = st.columns(3)
-                    
+                    # 按钮行：增加手动 AI 分析按钮
+                    col1, col2, col3, col4 = st.columns(4)
                     with col1:
                         if st.button("🔍 查看详细日志", key=f"detail_{suggestion['id']}"):
                             st.session_state[f"show_logs_{suggestion['id']}"] = True
                     with col2:
-                        if st.button("⚠️ 标记为误报", key=f"false_{suggestion['id']}"):
-                            pass
+                        # 手动 AI 分析按钮（仅对未处理或 AI 分析为空的情况显示）
+                        if suggestion.get('AI 分析') == "暂无 AI 分析" or suggestion.get('威胁类型') == "未知":
+                            if st.button("🤖 手动 AI 分析", key=f"manual_ai_{suggestion['id']}"):
+                                # 调用 AI 分析
+                                result_msg = manual_ai_analyze(
+                                    anomaly_id=suggestion['id'],
+                                    username=suggestion['用户'],
+                                    description=suggestion['异常描述'],
+                                    related_log_ids=[]  # 可根据需要从原数据中获取
+                                )
+                                st.session_state[f"manual_ai_result_{suggestion['id']}"] = result_msg
+                                st.rerun()
                     with col3:
+                        if st.button("⚠️ 标记为误报", key=f"false_{suggestion['id']}"):
+                            # 这里可以添加更新数据库的逻辑
+                            pass
+                    with col4:
                         if st.button("✅ 标记为已处置", key=f"resolve_{suggestion['id']}"):
+                            # 这里可以添加更新数据库的逻辑
                             pass
                     
-                    # 日志内容显示在按钮行下方，占满整个宽度
+                    # 显示手动 AI 分析结果
+                    result_key = f"manual_ai_result_{suggestion['id']}"
+                    if result_key in st.session_state:
+                        st.info(st.session_state[result_key])
+                        del st.session_state[result_key]
+                    
+                    # 显示详细日志
                     if st.session_state.get(f"show_logs_{suggestion['id']}", False):
                         logs = [
                             "2024-01-21 03:15:00 LOGIN user=zhangsan ip=10.0.0.100 status=SUCCESS",
                             "2024-01-21 03:16:00 API_CALL user=zhangsan endpoint=/api/sensitive/data count=1",
-                            "2024-01-21 03:17:00 API_CALL user=zhangsan endpoint=/api/sensitive/data count=2",
                         ]
                         st.markdown("**相关日志：**")
                         for log in logs:
                             st.code(log)
-            st.divider()
-    
-    # 如果没有符合条件的建议
     if not filtered_suggestions:
         st.info("没有符合条件的处置建议")
     
-    # 统计信息
+    # 处置统计（保持不变）
     st.divider()
     st.subheader("📊 处置统计")
-    
     stat_col1, stat_col2, stat_col3, stat_col4 = st.columns(4)
     with stat_col1:
         st.metric("待处置", "12")
@@ -1519,6 +1704,70 @@ def show_history_search():
     with stat_col3:
         st.metric("涉及用户数", "8")
 
+def manual_ai_analyze(anomaly_id: int, username: str, description: str, related_log_ids: list):
+    """手动触发 AI 分析并更新 anomaly_detection 表"""
+    try:
+        ai_config = settings.current_ai_config
+        if not ai_config or not ai_config.get('api_key'):
+            return "AI 分析器未配置，请检查 .env 文件"
+        ai_analyzer = AIAnalyzer(
+            api_key=ai_config['api_key'],
+            platform=ai_config['platform'],
+            model=ai_config.get('model'),
+            base_url=ai_config.get('base_url')
+        )
+
+        log_context = ""
+        if related_log_ids:
+            import clickhouse_connect
+            client = clickhouse_connect.get_client(
+                host=settings.clickhouse_host,
+                port=settings.clickhouse_port,
+                username=settings.clickhouse_user,
+                password=settings.clickhouse_password,
+                database=settings.clickhouse_database,
+                connect_timeout=5
+            )
+            ids_str = ','.join(str(i) for i in related_log_ids)
+            context_query = f"SELECT raw_log FROM {settings.clickhouse_table} WHERE id IN ({ids_str})"
+            context_res = client.query(context_query)
+            log_context = "\n".join(row[0] for row in context_res.result_rows if row[0])
+            client.close()
+
+        ai_result = ai_analyzer.analyze_anomaly(
+            username=username,
+            anomaly_description=description,
+            log_context=log_context
+        )
+
+        import clickhouse_connect
+        client = clickhouse_connect.get_client(
+            host=settings.clickhouse_host,
+            port=settings.clickhouse_port,
+            username=settings.clickhouse_user,
+            password=settings.clickhouse_password,
+            database=settings.clickhouse_database,
+            connect_timeout=5
+        )
+        update_sql = """
+        ALTER TABLE anomaly_detection UPDATE
+            threat_type = %(threat_type)s,
+            ai_analysis = %(ai_analysis)s,
+            `处置建议` = %(suggestion)s,
+            is_processed = 1,
+            processed_at = now()
+        WHERE id = %(id)s
+        """
+        client.command(update_sql, parameters={
+            'id': anomaly_id,
+            'threat_type': ai_result.get('threat_type', 'UNKNOWN'),
+            'ai_analysis': ai_result.get('description', ''),
+            'suggestion': ai_result.get('suggestion', '')
+        })
+        client.close()
+        return "AI 分析成功"
+    except Exception as e:
+        return f"AI 分析失败: {e}"
 
 def main():
     """主函数"""

@@ -5,9 +5,9 @@ from __future__ import annotations
 from typing import Any, Dict, List, Optional, TypedDict
 
 from src.behavior.normalizer import get_username, parse_timestamp_value
-from src.behavior.repository import ClickHouseBehaviorDataError, build_behavior_payload_from_clickhouse
 from src.behavior.service import BehaviorAnalysisService
 from src.utils.helpers import format_datetime
+from src.utils.config import settings   # 新增导入全局配置
 
 try:
     from src.utils.logger import get_logger
@@ -78,25 +78,30 @@ def analyze_behavior_for_frontend(payload: dict) -> dict:
 
 
 def analyze_behavior_from_clickhouse(target_user: str) -> Dict[str, Any]:
+    """从 ClickHouse 读取用户行为日志并进行分析（使用全局配置，可移植性强）"""
     import clickhouse_connect
     from src.behavior.service import BehaviorAnalysisService
 
+    # 从全局配置中读取 ClickHouse 连接参数，避免硬编码
     ch_config = {
-        'host': 'localhost',
-        'port': 8123,
-        'username': 'test_user',
-        'password': 'test_password',
-        'database': 'test_logs'
+        'host': settings.clickhouse_host,
+        'port': settings.clickhouse_port,
+        'username': settings.clickhouse_user,
+        'password': settings.clickhouse_password,
+        'database': settings.clickhouse_database,
     }
+    table_name = settings.clickhouse_table   # 例如 'logs_structured'
+
     try:
         client = clickhouse_connect.get_client(**ch_config, connect_timeout=5)
     except Exception as e:
+        logger.error(f"ClickHouse 连接失败: {e}")
         return {"success": False, "error": f"ClickHouse 连接失败: {e}"}
 
     try:
         # 历史日志（最近24小时）
-        history_query = """
-            SELECT * FROM logs_structured
+        history_query = f"""
+            SELECT * FROM {table_name}
             WHERE username = %(user)s AND timestamp >= now() - INTERVAL 24 HOUR
             ORDER BY timestamp
         """
@@ -104,8 +109,8 @@ def analyze_behavior_from_clickhouse(target_user: str) -> Dict[str, Any]:
         history_logs = [dict(zip(history_result.column_names, row)) for row in history_result.result_rows]
 
         # 检测日志（最近1小时）
-        detection_query = """
-            SELECT * FROM logs_structured
+        detection_query = f"""
+            SELECT * FROM {table_name}
             WHERE username = %(user)s AND timestamp >= now() - INTERVAL 1 HOUR
             ORDER BY timestamp
         """
@@ -120,6 +125,7 @@ def analyze_behavior_from_clickhouse(target_user: str) -> Dict[str, Any]:
         result = service.analyze_user(target_user, history_logs, detection_logs)
         return {"success": True, **result}
     except Exception as e:
+        logger.error(f"行为分析查询失败: {e}")
         client.close()
         return {"success": False, "error": str(e)}
 
@@ -273,7 +279,6 @@ def _error_response(code: str, message: str) -> Dict[str, Any]:
             "message": message,
         },
     }
-
 
 
 def _clickhouse_error_response(target_user: str, message: str) -> Dict[str, Any]:

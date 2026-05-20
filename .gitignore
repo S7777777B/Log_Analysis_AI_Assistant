@@ -59,6 +59,7 @@ reports/weekly/*
 htmlcov/
 .tox/
 mytest/
+feature/tests/visualization/dashboard_test.py
 
 # Jupyter Notebook
 .ipynb_checkpoints
@@ -76,3 +77,6 @@ Thumbs.db
 
 # 钉钉老师给的文件可放置的文件夹
 .trae/dingding/
+.gitignore
+.test_temp
+
