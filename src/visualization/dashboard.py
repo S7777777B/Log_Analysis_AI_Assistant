@@ -21,15 +21,16 @@ from src.utils.config import settings
 import clickhouse_connect
 
 # 设置日志配置
+import sys
 import os
 
-from dotenv import load_dotenv
-
-# 加载项目根目录的 .env 文件
-load_dotenv()
+# 将项目根目录添加到 Python 路径
+project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+if project_root not in sys.path:
+    sys.path.insert(0, project_root)
 
 # 确保 logs 目录存在
-logs_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "logs")
+logs_dir = os.path.join(project_root, "logs")
 os.makedirs(logs_dir, exist_ok=True)
 
 # 获取当前日期作为日志文件名
@@ -58,11 +59,32 @@ except ImportError as e:
     STORAGE_AVAILABLE = False
     logger.warning(f"⚠️ 无法导入存储模块，将使用模拟数据: {e}")
 
+# 尝试导入 AI 模块
+try:
+    from src.ai.analyzer import AIAnalyzer
+    from src.utils.config import settings
+    AI_AVAILABLE = True
+    logger.info("✅ 成功导入 AI 模块")
+except ImportError as e:
+    AI_AVAILABLE = False
+    logger.warning(f"⚠️ 无法导入 AI 模块: {e}")
+
 from fpdf import FPDF
 from src.behavior.api import (
     analyze_behavior_for_frontend,
     analyze_behavior_from_clickhouse,
 )
+
+# ClickHouse 客户端辅助函数
+def get_clickhouse_client():
+    """获取 ClickHouse 客户端实例"""
+    return ClickHouseClient({
+        'host': settings.clickhouse_host,
+        'port': settings.clickhouse_port,
+        'username': settings.clickhouse_user,
+        'password': settings.clickhouse_password,
+        'database': settings.clickhouse_database
+    })
 
 # 设置页面配置
 st.set_page_config(
@@ -187,6 +209,55 @@ def init_session_state():
         st.session_state.ai_suggestions = []
     if "data_source" not in st.session_state:
         st.session_state.data_source = "模拟数据"
+
+
+@st.cache_resource
+def get_ai_analyzer():
+    """获取 AI 分析器实例（缓存）"""
+    if not AI_AVAILABLE:
+        return None
+    try:
+        config = settings.current_ai_config
+        analyzer = AIAnalyzer(
+            api_key=config["api_key"],
+            platform=config["platform"],
+            model=config.get("model"),
+            base_url=config.get("base_url"),
+        )
+        logger.info(f"🤖 AI 分析器初始化成功: platform={config['platform']}")
+        return analyzer
+    except Exception as e:
+        logger.error(f"❌ AI 分析器初始化失败: {e}")
+        return None
+
+
+def analyze_anomaly_with_ai(username: str, anomaly_description: str, log_context: str = None) -> Dict[str, Any]:
+    """使用 AI 分析异常行为"""
+    analyzer = get_ai_analyzer()
+    if analyzer is None:
+        return {
+            "threat_type": "AI_UNAVAILABLE",
+            "risk_level": "MEDIUM",
+            "description": "AI 服务不可用，请检查配置",
+            "suggestion": "请人工审查该异常行为"
+        }
+    
+    try:
+        result = analyzer.analyze_anomaly(
+            username=username,
+            anomaly_description=anomaly_description,
+            log_context=log_context
+        )
+        logger.info(f"🤖 AI 分析完成: user={username}, threat={result.get('threat_type')}")
+        return result
+    except Exception as e:
+        logger.error(f"❌ AI 分析失败: {e}")
+        return {
+            "threat_type": "ANALYSIS_ERROR",
+            "risk_level": "MEDIUM",
+            "description": f"AI 分析失败: {str(e)}",
+            "suggestion": "请人工审查该异常行为"
+        }
 
 
 # ==================== 模拟数据层 ====================
@@ -614,8 +685,9 @@ def fetch_realtime_logs(log_type="全部", limit=100):
 
 
 def fetch_anomaly_users(time_range="最近 24 小时", limit=10):
-    """从 anomaly_detection 表获取异常用户排行"""
-    import clickhouse_connect
+    """从 ClickHouse 获取真实异常用户数据"""
+    client = get_clickhouse_client()
+    
     time_map = {
         "最近 24 小时": 24,
         "最近 7 天": 168,
@@ -667,26 +739,16 @@ def fetch_anomaly_users(time_range="最近 24 小时", limit=10):
 
 
 def fetch_security_metrics():
-    """从 ClickHouse 计算安全指标"""
-    import clickhouse_connect
-    try:
-        client = clickhouse_connect.get_client(
-            host=settings.clickhouse_host,
-            port=settings.clickhouse_port,
-            username=settings.clickhouse_user,
-            password=settings.clickhouse_password,
-            database=settings.clickhouse_database,
-            connect_timeout=5
-        )
-    except Exception as e:
-        logger.error(f"ClickHouse 连接失败: {e}")
-        return get_sample_security_metrics()
-
-    # 今日异常事件数（从 anomaly_detection 表）
-    anomaly_query = f"""
-    SELECT count() FROM anomaly_detection
-    WHERE toDate(detection_time) = today()
-    """
+    """从 ClickHouse 获取真实安全指标数据"""
+    client = get_clickhouse_client()
+    
+    # 获取整体安全评分
+    score_query = "SELECT AVG(security_score) FROM daily_security_scores WHERE date = TODAY()"
+    score_result = client.query(score_query)
+    security_score = int(score_result[0][0]) if score_result else 75
+    
+    # 获取今日异常事件数
+    anomaly_query = "SELECT COUNT(*) FROM anomaly_events WHERE event_time >= TODAY()"
     anomaly_result = client.query(anomaly_query)
     anomaly_count = anomaly_result.result_rows[0][0] if anomaly_result.result_rows else 0
 
@@ -722,29 +784,13 @@ def fetch_security_metrics():
 
 
 def fetch_security_trend(days=7):
-    """获取近几天异常事件数趋势"""
-    import clickhouse_connect
-    try:
-        client = clickhouse_connect.get_client(
-            host=settings.clickhouse_host,
-            port=settings.clickhouse_port,
-            username=settings.clickhouse_user,
-            password=settings.clickhouse_password,
-            database=settings.clickhouse_database,
-            connect_timeout=5
-        )
-    except Exception as e:
-        logger.error(f"ClickHouse 连接失败: {e}")
-        return get_sample_security_trend(days)
-
-    query = f"""
-    SELECT
-        toDate(detection_time) as date,
-        count() as anomaly_count
-    FROM anomaly_detection
-    WHERE detection_time >= today() - INTERVAL {days} DAY
-    GROUP BY date
-    ORDER BY date
+    """从 ClickHouse 获取真实安全评分趋势"""
+    client = get_clickhouse_client()
+    query = """
+        SELECT date, security_score, anomaly_count
+        FROM daily_security_scores
+        WHERE date >= TODAY() - INTERVAL %s DAY
+        ORDER BY date
     """
     result = client.query(query)
     data = {"日期": [], "安全评分": [], "异常事件数": []}
@@ -763,29 +809,9 @@ def fetch_security_trend(days=7):
 
 
 def fetch_risk_distribution():
-    """从 anomaly_detection 统计风险等级分布"""
-    import clickhouse_connect
-    try:
-        client = clickhouse_connect.get_client(
-            host=settings.clickhouse_host,
-            port=settings.clickhouse_port,
-            username=settings.clickhouse_user,
-            password=settings.clickhouse_password,
-            database=settings.clickhouse_database,
-            connect_timeout=5
-        )
-    except Exception as e:
-        logger.error(f"ClickHouse 连接失败: {e}")
-        return get_sample_risk_distribution()
-
-    query = f"""
-    SELECT
-        risk_level,
-        count() as cnt
-    FROM anomaly_detection
-    WHERE toDate(detection_time) = today()
-    GROUP BY risk_level
-    """
+    """从 ClickHouse 获取真实风险等级分布"""
+    client = get_clickhouse_client()
+    query = "SELECT risk_level, COUNT(*) FROM anomaly_events WHERE event_time >= TODAY() GROUP BY risk_level"
     result = client.query(query)
     data = {"风险等级": [], "事件数": []}
     # 映射等级显示
@@ -798,31 +824,9 @@ def fetch_risk_distribution():
     return pd.DataFrame(data)
 
 def fetch_threat_stats():
-    """从 anomaly_detection 统计威胁类型"""
-    import clickhouse_connect
-    try:
-        client = clickhouse_connect.get_client(
-            host=settings.clickhouse_host,
-            port=settings.clickhouse_port,
-            username=settings.clickhouse_user,
-            password=settings.clickhouse_password,
-            database=settings.clickhouse_database,
-            connect_timeout=5
-        )
-    except Exception as e:
-        logger.error(f"ClickHouse 连接失败: {e}")
-        return get_sample_threat_stats()
-
-    query = f"""
-    SELECT
-        threat_type,
-        count() as cnt
-    FROM anomaly_detection
-    WHERE toDate(detection_time) = today() AND threat_type IS NOT NULL
-    GROUP BY threat_type
-    ORDER BY cnt DESC
-    LIMIT 5
-    """
+    """从 ClickHouse 获取真实威胁类型统计"""
+    client = get_clickhouse_client()
+    query = "SELECT threat_type, COUNT(*) FROM anomaly_events WHERE event_time >= TODAY() GROUP BY threat_type"
     result = client.query(query)
     data = {"威胁类型": [], "数量": []}
     for row in result.result_rows:
@@ -833,35 +837,13 @@ def fetch_threat_stats():
 
 
 def fetch_ai_suggestions(status_filter="全部", risk_filter="全部"):
-    """从 anomaly_detection 表获取 AI 分析后的异常数据"""
-    import clickhouse_connect
-    try:
-        client = clickhouse_connect.get_client(
-            host=settings.clickhouse_host,
-            port=settings.clickhouse_port,
-            username=settings.clickhouse_user,
-            password=settings.clickhouse_password,
-            database=settings.clickhouse_database,
-            connect_timeout=5
-        )
-    except Exception as e:
-        logger.error(f"ClickHouse 连接失败: {e}")
-        return []   # 不再返回 demo
-
-    query = f"""
-    SELECT
-        id,
-        username,
-        threat_type,
-        risk_level,
-        description,
-        ai_analysis,
-        `处置建议` AS suggestion,
-        anomaly_score AS confidence,
-        is_processed,
-        detection_time AS create_time
-    FROM anomaly_detection
-    WHERE 1=1
+    """从 ClickHouse 获取真实 AI 处置建议"""
+    client = get_clickhouse_client()
+    query = """
+        SELECT id, username, threat_type, risk_level, anomaly_description, 
+               ai_analysis, suggestion, confidence, status, create_time
+        FROM ai_suggestions
+        WHERE 1=1
     """
     params = {}
     if risk_filter != "全部":
@@ -917,32 +899,12 @@ def _risk_level_to_icon(level: str) -> str:
 
 def fetch_history_logs(start_time=None, end_time=None, username=None, source_ip=None,
                        log_type="全部", status="全部"):
-    """从 ClickHouse logs_structured 表搜索历史日志"""
-    import clickhouse_connect
-    try:
-        client = clickhouse_connect.get_client(
-            host=settings.clickhouse_host,
-            port=settings.clickhouse_port,
-            username=settings.clickhouse_user,
-            password=settings.clickhouse_password,
-            database=settings.clickhouse_database,
-            connect_timeout=5
-        )
-    except Exception as e:
-        logger.error(f"ClickHouse 连接失败: {e}")
-        return get_sample_search_results()
-
-    query = f"""
-    SELECT
-        timestamp,
-        username,
-        log_type,
-        source_ip,
-        result,
-        src_city,
-        risk_score
-    FROM {settings.clickhouse_table}
-    WHERE 1=1
+    """从 ClickHouse 搜索真实历史日志"""
+    client = get_clickhouse_client()
+    query = """
+        SELECT timestamp, username, log_type, source_ip, status, location, risk_level
+        FROM security_logs
+        WHERE 1=1
     """
     params = []
     if start_time:
@@ -1266,7 +1228,7 @@ def create_sidebar():
             "实时日志流": "📡",
             "UEBA 异常排行": "👥",
             "安全评分看板": "🛡️",
-            "AI 处置建议": "🤖",
+            "处置+AI建议": "🤖",
             "历史查询": "🔍"
         }
         
@@ -1394,18 +1356,42 @@ def show_ueba_ranking():
         st.error(f"行为分析失败：{behavior_result.get('error', '未知错误')}")
         return
 
-    # 展示分析结果
-    baseline = behavior_result.get("baseline", {})
-    summary = behavior_result.get("summary", {})
-    col_a, col_b, col_c, col_d = st.columns(4)
-    with col_a:
-        st.metric("目标用户", selected_user)
-    with col_b:
-        st.metric("基线样本数", str(baseline.get("sample_count", 0)))
-    with col_c:
-        st.metric("基线可靠", "是" if baseline.get("is_reliable") else "否")
-    with col_d:
-        st.metric("异常数量", str(len(behavior_result.get("anomalies", []))))
+        anomaly_events = selected_behavior_data.get("anomalies", [])
+        if not anomaly_events:
+            st.info("暂无异常行为")
+
+        for i, event in enumerate(anomaly_events):
+            event_time = event.get("timestamp", "-")
+            event_type = event.get("anomaly_type", "-")
+            with st.expander(f"⚠️ {event_time} - {event_type}"):
+                col1, col2 = st.columns(2)
+                with col1:
+                    st.markdown(f"**时间**: {event_time}")
+                    st.markdown(f"**类型**: {event_type}")
+                    st.markdown(f"**描述**: {event.get('reason', '-')}")
+                with col2:
+                    st.markdown(f"**风险等级**: {event.get('risk_level', '-')}")
+                    st.markdown(f"**风险评分**: {event.get('risk_score', '-')}")
+                
+                col1, col2 = st.columns(2)
+                with col1:
+                    if st.button("✅ 标记为误报", key=f"false_{i}"):
+                        st.success("已标记为误报")
+                with col2:
+                    if st.button("🤖 生成 AI 建议", key=f"ai_{i}"):
+                        with st.spinner("🔍 AI 分析中..."):
+                            log_context = f"IP: {event['IP']}, 地点: {event['地点']}, 时间: {event['时间']}"
+                            ai_result = analyze_anomaly_with_ai(
+                                username=selected_user,
+                                anomaly_description=event['描述'],
+                                log_context=log_context
+                            )
+                        
+                        st.markdown("---")
+                        st.markdown(f"**🚨 威胁类型**: {ai_result.get('threat_type', 'UNKNOWN')}")
+                        st.markdown(f"**⚠️ 风险等级**: {ai_result.get('risk_level', 'MEDIUM')}")
+                        st.info(f"**📝 分析说明**: {ai_result.get('description', '')}")
+                        st.warning(f"**💡 处置建议**: {ai_result.get('suggestion', '')}")
 
     detail_col1, detail_col2, detail_col3 = st.columns(3)
     with detail_col1:
@@ -1781,7 +1767,7 @@ def main():
         show_ueba_ranking()
     elif st.session_state.current_page == "安全评分看板":
         show_security_score()
-    elif st.session_state.current_page == "AI 处置建议":
+    elif st.session_state.current_page == "处置+AI建议":
         show_ai_suggestions()
     elif st.session_state.current_page == "历史查询":
         show_history_search()
